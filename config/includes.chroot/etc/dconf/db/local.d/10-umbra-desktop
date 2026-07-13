@@ -1,0 +1,108 @@
+# Umbra OS — GNOME "cyber-dark" desktop (compiled into the dconf 'local' db by the branding hook).
+
+[org/gnome/desktop/background]
+picture-uri='file:///usr/share/backgrounds/umbra/wallpaper.png'
+picture-uri-dark='file:///usr/share/backgrounds/umbra/wallpaper.png'
+picture-options='zoom'
+primary-color='#0b0f1c'
+
+[org/gnome/desktop/screensaver]
+picture-uri='file:///usr/share/backgrounds/umbra/wallpaper.png'
+primary-color='#0b0f1c'
+lock-enabled=true
+lock-delay=uint32 0
+
+[org/gnome/desktop/interface]
+color-scheme='prefer-dark'
+gtk-theme='Yaru-purple-dark'
+icon-theme='Papirus-Dark'
+cursor-theme='Bibata-Modern-Ice'
+accent-color='purple'
+font-name='Inter 11'
+document-font-name='Inter 11'
+monospace-font-name='JetBrains Mono 11'
+font-antialiasing='rgba'
+font-hinting='slight'
+clock-format='24h'
+clock-show-seconds=true
+show-battery-percentage=true
+enable-hot-corners=true
+
+[org/gnome/shell]
+enabled-extensions=['user-theme@gnome-shell-extensions.gcampax.github.com', 'dash-to-dock@micxgx.gmail.com', 'blur-my-shell@aunetx', 'appindicatorsupport@rgcjonas.gmail.com']
+favorite-apps=['firefox-esr.desktop', 'org.gnome.Terminal.desktop', 'org.gnome.Nautilus.desktop', 'org.keepassxc.KeePassXC.desktop', 'org.gnome.Settings.desktop']
+# Suppress the GNOME "welcome / getting started" dialog and tour
+welcome-dialog-last-shown-version='9999.0'
+
+[org/gnome/shell/extensions/user-theme]
+name='Yaru-purple-dark'
+
+[org/gnome/shell/extensions/dash-to-dock]
+dock-position='BOTTOM'
+dock-fixed=false
+autohide=true
+intellihide=true
+intellihide-mode='FOCUS_APPLICATION_WINDOWS'
+extend-height=false
+transparency-mode='DYNAMIC'
+custom-theme-shrink=true
+show-trash=false
+show-mounts=false
+show-show-apps-button=true
+running-indicator-style='DOTS'
+click-action='minimize-or-overview'
+custom-background-color=true
+background-color='#0b0f1c'
+apply-custom-theme=false
+
+[org/gnome/shell/extensions/blur-my-shell]
+color-and-noise=true
+
+[org/gnome/shell/extensions/blur-my-shell/panel]
+blur=true
+brightness=0.6
+sigma=30
+
+[org/gnome/shell/extensions/blur-my-shell/overview]
+blur=true
+
+[org/gnome/desktop/wm/preferences]
+button-layout='appmenu:minimize,maximize,close'
+titlebar-font='Inter Bold 11'
+
+[org/gnome/desktop/session]
+idle-delay=uint32 300
+
+[org/gnome/desktop/privacy]
+remember-recent-files=false
+remove-old-trash-files=true
+remove-old-temp-files=true
+old-files-age=uint32 1
+report-technical-problems=false
+send-software-usage-stats=false
+
+[org/gnome/system/location]
+enabled=false
+
+# --- Umbra terminal profile (dark, purple-tinted, JetBrains Mono) ---
+[org/gnome/terminal/legacy]
+theme-variant='dark'
+default-show-menubar=false
+
+[org/gnome/terminal/legacy/profiles:]
+default='u000000-0000-0000-0000-0000umbra01'
+list=['u000000-0000-0000-0000-0000umbra01']
+
+[org/gnome/terminal/legacy/profiles:/:u000000-0000-0000-0000-0000umbra01]
+visible-name='Umbra'
+use-theme-colors=false
+foreground-color='#c9d4f0'
+background-color='#0b0f1c'
+bold-color-same-as-fg=true
+palette=['#10141f', '#e06c75', '#98c379', '#e5c07b', '#6f8cff', '#7a4fe0', '#56b6c2', '#c9d4f0', '#3b4252', '#ff7b86', '#b6e3a1', '#ffd58a', '#8fa6ff', '#9d7bff', '#7fd6e0', '#ffffff']
+use-system-font=false
+font='JetBrains Mono 11'
+use-transparent-background=true
+background-transparency-percent=8
+cursor-shape='block'
+audible-bell=false

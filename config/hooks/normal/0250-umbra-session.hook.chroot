@@ -1,0 +1,25 @@
+#!/bin/bash
+# Umbra OS — make lightdm the active display manager and i3 the default session,
+# even though GNOME/GDM stays installed (for its apps). Autologin -> i3.
+set -uo pipefail
+
+echo "umbra: setting lightdm + i3 as the default session"
+
+# Force lightdm as the system display manager (gdm3 stays installed but inactive).
+echo "/usr/sbin/lightdm" > /etc/X11/default-display-manager
+echo "set lightdm shared/default-x-display-manager select lightdm" | debconf-set-selections 2>/dev/null || true
+echo "set gdm3 shared/default-x-display-manager select lightdm"    | debconf-set-selections 2>/dev/null || true
+
+systemctl disable gdm3.service 2>/dev/null || true
+systemctl disable gdm.service  2>/dev/null || true
+systemctl enable  lightdm.service 2>/dev/null || true
+ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.service 2>/dev/null || true
+
+# Make executables runnable
+chmod +x /etc/polybar/launch.sh /usr/local/bin/umbra-help /usr/local/bin/umbra 2>/dev/null || true
+
+# Ensure an i3 xsession exists (installed by the i3 package); sanity log.
+[ -f /usr/share/xsessions/i3.desktop ] && echo "umbra: i3 xsession present" \
+    || echo "umbra: WARNING i3.desktop missing"
+
+echo "umbra: session hook complete"

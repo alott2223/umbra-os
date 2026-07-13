@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Umbra Security Center
+Comment=Audit, network, privacy and emergency security commands
+Exec=alacritty --title "Umbra Security" -e bash -c "umbra; echo; read -p 'press enter to close'"
+Icon=security-high
+Terminal=false
+Categories=System;Security;
+Keywords=security;audit;opsec;firewall;tor;scan;

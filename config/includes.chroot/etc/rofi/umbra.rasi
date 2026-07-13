@@ -1,0 +1,41 @@
+/* Umbra OS — rofi launcher theme (neon-on-black, purple). */
+* {
+    bg:       #05070dF2;
+    bg-alt:   #0b0f1c;
+    fg:       #c9d4f0;
+    purple:   #a855f7;
+    cyan:     #22d3ee;
+    magenta:  #ff5ecb;
+    muted:    #5f6f92;
+    background-color: transparent;
+    text-color: @fg;
+    font: "JetBrains Mono 12";
+}
+window {
+    transparency: "real";
+    background-color: @bg;
+    border: 2px;
+    border-color: @purple;
+    border-radius: 14px;
+    width: 620px;
+    padding: 18px;
+    location: center;
+}
+mainbox { children: [ inputbar, listview ]; spacing: 12px; }
+inputbar {
+    background-color: @bg-alt;
+    border-radius: 10px;
+    padding: 12px 16px;
+    children: [ prompt, entry ];
+}
+prompt { text-color: @purple; margin: 0 10px 0 0; }
+entry { placeholder: "search umbra…"; placeholder-color: @muted; }
+listview { lines: 8; scrollbar: false; spacing: 4px; }
+element { padding: 10px 14px; border-radius: 8px; }
+element normal.normal { text-color: @fg; }
+element selected.normal {
+    background-color: @purple;
+    text-color: #05070d;
+}
+element-text { vertical-align: 0.5; }
+element-icon { size: 22px; margin: 0 12px 0 0; }

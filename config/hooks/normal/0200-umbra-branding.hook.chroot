@@ -1,0 +1,109 @@
+#!/bin/bash
+# Umbra OS — chroot hook: reskin/branding baked into the image.
+set -euo pipefail
+
+echo "umbra: applying branding"
+
+# --- wallpaper + logo: render SVG -> PNG -----------------------------------
+mkdir -p /usr/share/backgrounds/umbra
+if command -v rsvg-convert >/dev/null; then
+    rsvg-convert -w 1920 -h 1080 /usr/share/backgrounds/umbra/wallpaper.svg \
+        -o /usr/share/backgrounds/umbra/wallpaper.png || true
+    rsvg-convert -w 256 -h 256 /usr/share/backgrounds/umbra/logo.svg \
+        -o /usr/share/plymouth/themes/umbra/logo.png || true
+    rsvg-convert -w 200 -h 200 /usr/share/backgrounds/umbra/logo.svg \
+        -o /usr/share/backgrounds/umbra/logo.png || true
+fi
+
+# --- Plymouth boot splash ---------------------------------------------------
+if command -v plymouth-set-default-theme >/dev/null; then
+    plymouth-set-default-theme umbra || true
+    update-initramfs -u 2>/dev/null || true
+fi
+
+# --- GNOME/GDM defaults via dconf ------------------------------------------
+if command -v dconf >/dev/null; then
+    dconf update || true
+fi
+# GDM greeter: Umbra logo (replaces the Debian vendor logo), dark, login banner
+mkdir -p /etc/dconf/db/gdm.d
+cat > /etc/dconf/db/gdm.d/10-umbra <<'EOF'
+[org/gnome/desktop/interface]
+color-scheme='prefer-dark'
+gtk-theme='Yaru-purple-dark'
+icon-theme='Papirus-Dark'
+cursor-theme='Bibata-Modern-Ice'
+[org/gnome/login-screen]
+logo='/usr/share/backgrounds/umbra/logo.png'
+banner-message-enable=true
+banner-message-text='Umbra OS — authorized use only. Activity is monitored.'
+disable-user-list=true
+EOF
+dconf update 2>/dev/null || true
+
+# --- strip Debian branding that shows in the greeter/tour -------------------
+# The GDM 'logo' dconf above already points at the Umbra logo, overriding the
+# desktop-base vendor logo. Remove the GNOME welcome tour ("Getting Started").
+apt-get purge -y gnome-tour 2>/dev/null || true
+# Neuter gnome-initial-setup so first login goes straight to the desktop.
+rm -f /etc/xdg/autostart/gnome-initial-setup-first-login.desktop 2>/dev/null || true
+systemctl disable gnome-initial-setup-first-login.service 2>/dev/null || true
+
+# --- GRUB theme (installed-system boot menu) --------------------------------
+mkdir -p /boot/grub/themes/umbra
+if command -v rsvg-convert >/dev/null; then
+    rsvg-convert -w 1920 -h 1080 /usr/share/backgrounds/umbra/wallpaper.svg \
+        -o /boot/grub/themes/umbra/background.png || true
+fi
+cat > /boot/grub/themes/umbra/theme.txt <<'EOF'
+desktop-image: "background.png"
+title-text: ""
+terminal-box: "terminal_box_*.png"
++ boot_menu {
+    left = 30%
+    top = 40%
+    width = 40%
+    height = 45%
+    item_color = "#9fb2d8"
+    selected_item_color = "#ffffff"
+    item_height = 28
+    item_spacing = 8
+}
++ label { top = 88%; left = 0; width = 100%; align = "center";
+          color = "#5f6f92"; text = "Umbra OS" }
+EOF
+grep -q '^GRUB_THEME=' /etc/default/grub 2>/dev/null || \
+    echo 'GRUB_THEME=/boot/grub/themes/umbra/theme.txt' >> /etc/default/grub
+
+# --- Firefox system-wide hardening (autoconfig) -----------------------------
+FFDIR=$(ls -d /usr/lib/firefox-esr 2>/dev/null | head -1 || true)
+if [[ -n "$FFDIR" ]]; then
+    cat > "$FFDIR/defaults/pref/autoconfig.js" <<'EOF'
+pref("general.config.filename", "umbra.cfg");
+pref("general.config.obscure_value", 0);
+pref("general.config.sandbox_enabled", false);
+EOF
+    # firefox reads the .cfg from its install root; our prefs live in /etc, symlink them
+    { echo '// Umbra autoconfig'; cat /etc/firefox-esr/umbra.js; } > "$FFDIR/umbra.cfg"
+fi
+
+# --- generic hostname (opsec: don't leak a unique name on every network) ----
+echo 'umbra' > /etc/hostname
+sed -i 's/127.0.1.1.*/127.0.1.1\tumbra/' /etc/hosts 2>/dev/null || echo '127.0.1.1	umbra' >> /etc/hosts
+
+# --- fastfetch splash in GUI terminals (gnome-terminal reads /etc/bash.bashrc) ----
+if ! grep -q 'umbra-fastfetch' /etc/bash.bashrc 2>/dev/null; then
+    cat >> /etc/bash.bashrc <<'EOF'
+
+# umbra-fastfetch: show the Umbra splash once per interactive terminal
+if [ -n "${PS1:-}" ] && [ -z "${UMBRA_FETCH_SHOWN:-}" ] && command -v fastfetch >/dev/null 2>&1; then
+    export UMBRA_FETCH_SHOWN=1
+    fastfetch 2>/dev/null || true
+fi
+EOF
+fi
+
+# --- default the live user's shell theme + extensions on first login ----------
+# (dconf 'local' db already carries these; nothing else needed here.)
+
+echo "umbra: branding complete"

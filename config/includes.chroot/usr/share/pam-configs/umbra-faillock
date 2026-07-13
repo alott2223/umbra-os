@@ -1,0 +1,12 @@
+Name: Umbra faillock (lockout on repeated auth failure)
+Default: yes
+Priority: 1000
+Auth-Type: Primary
+Auth:
+	[default=die] pam_faillock.so authfail
+	sufficient pam_faillock.so authsucc
+Auth-Initial:
+	requisite pam_faillock.so preauth
+Account-Type: Primary
+Account:
+	required pam_faillock.so

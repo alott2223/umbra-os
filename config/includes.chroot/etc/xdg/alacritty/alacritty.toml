@@ -1,0 +1,50 @@
+# Umbra OS — alacritty terminal (neon-on-black, JetBrains Mono).
+
+[window]
+padding = { x = 14, y = 12 }
+dynamic_padding = true
+opacity = 0.94
+decorations = "none"
+title = "Umbra Terminal"
+
+[font]
+size = 11.0
+normal = { family = "JetBrains Mono", style = "Regular" }
+bold   = { family = "JetBrains Mono", style = "Bold" }
+italic = { family = "JetBrains Mono", style = "Italic" }
+
+[cursor]
+style = { shape = "Block", blinking = "On" }
+
+[colors.primary]
+background = "#05070d"
+foreground = "#c9d4f0"
+dim_foreground = "#8fa3c8"
+
+[colors.cursor]
+text = "#05070d"
+cursor = "#a855f7"
+
+[colors.selection]
+text = "#05070d"
+background = "#a855f7"
+
+[colors.normal]
+black   = "#10141f"
+red     = "#ff5555"
+green   = "#50fa7b"
+yellow  = "#f1fa8c"
+blue    = "#7c5cff"
+magenta = "#ff5ecb"
+cyan    = "#22d3ee"
+white   = "#c9d4f0"
+
+[colors.bright]
+black   = "#3b4252"
+red     = "#ff6e6e"
+green   = "#69ff94"
+yellow  = "#ffffa5"
+blue    = "#9d7bff"
+magenta = "#ff92df"
+cyan    = "#7fe0ee"
+white   = "#ffffff"

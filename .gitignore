@@ -1,0 +1,19 @@
+# Build artifacts — never commit the multi-GB ISO or live-build work tree
+out/
+work/
+*.iso
+*.img
+*.hybrid.iso
+SHA256SUMS
+
+# live-build leftovers
+.build/
+chroot/
+binary/
+cache/
+*.log
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini

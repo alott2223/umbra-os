@@ -1,0 +1,15 @@
+# Umbra OS — PARANOID tier. Disabled by default.
+# Activate with:  umbra-harden-install.sh --paranoid
+#
+# READ FIRST — this tier breaks things:
+#   * unprivileged_userns_clone=0 breaks Chromium/Electron/Flatpak/bubblewrap
+#     sandboxes and rootless containers. They fail closed.
+#   * ptrace_scope=3 disables ptrace entirely until reboot (no strace/gdb).
+
+kernel.unprivileged_userns_clone = 0
+kernel.yama.ptrace_scope = 3
+net.ipv4.icmp_echo_ignore_all = 1
+net.ipv4.tcp_timestamps = 0
+net.ipv4.tcp_sack = 0
+net.ipv4.tcp_dsack = 0
+net.ipv4.tcp_fack = 0

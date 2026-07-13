@@ -1,0 +1,65 @@
+#!/usr/sbin/nft -f
+# Umbra OS — Tor transparent-proxy kill-switch ruleset.
+# Installed by `umbra-torswitch on`. Forces ALL traffic through Tor and DROPS
+# anything that can't be torified — so a Tor failure means no traffic leaks,
+# never a fallback to the clear net.
+#
+# The tor daemon runs as user `debian-tor`; its own outbound is allowed so it
+# can actually reach the Tor network. Everything else from every other user is
+# redirected into Tor's TransPort / DNSPort or dropped.
+#
+# CAVEAT: same-host transparent torification is weaker than a separate Tor
+# gateway (Whonix). It is a strong leak-prevention kill-switch, not an anonymity
+# guarantee. See docs/OPSEC.md.
+
+flush ruleset
+
+define TOR_UID = 108        # overwritten at runtime by umbra-torswitch with the real uid
+define TRANS_PORT = 9040
+define DNS_PORT = 5353
+
+table inet umbra_tor {
+    chain output {
+        type nat hook output priority -100; policy accept;
+
+        # tor's own traffic goes out untouched
+        meta skuid $TOR_UID accept
+
+        # never redirect loopback
+        oif "lo" accept
+
+        # redirect all DNS to Tor's DNSPort
+        udp dport 53 redirect to :$DNS_PORT
+        tcp dport 53 redirect to :$DNS_PORT
+
+        # leave LAN/loopback destinations alone
+        ip daddr { 127.0.0.0/8, 10.192.0.0/10 } accept
+
+        # redirect all remaining TCP into Tor's TransPort
+        meta l4proto tcp redirect to :$TRANS_PORT
+    }
+
+    chain filter_out {
+        type filter hook output priority filter; policy drop;
+
+        meta skuid $TOR_UID accept
+        oif "lo" accept
+        ct state established,related accept
+
+        # allow only the redirected DNS/TCP that the nat chain produced
+        ip daddr { 127.0.0.0/8, 10.192.0.0/10 } accept
+
+        # Block everything else (UDP incl. QUIC, ICMP, etc.) — no leaks.
+        # (TCP is already redirected to Tor by the nat/output chain above.)
+    }
+
+    chain input {
+        type filter hook input priority filter; policy drop;
+        iif "lo" accept
+        ct state established,related accept
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+    }
+}

@@ -1,0 +1,75 @@
+#!/bin/bash
+# Umbra OS — chroot hook: hardening applied while building the image.
+set -euo pipefail
+
+echo "umbra: applying in-chroot hardening"
+
+# umask 077 (high-assurance: new files are private by default) + strong hashing
+sed -i 's/^UMASK.*/UMASK\t\t077/' /etc/login.defs
+grep -q '^YESCRYPT_COST_FACTOR' /etc/login.defs || echo 'YESCRYPT_COST_FACTOR 11' >> /etc/login.defs
+
+# sudo refuses sudoers.d if it (or files in it) are world-writable
+chmod 0755 /etc/sudoers.d 2>/dev/null || true
+chmod 0440 /etc/sudoers.d/* 2>/dev/null || true
+mkdir -p /var/log/sudo-io && chmod 700 /var/log/sudo-io
+grep -q '^HOME_MODE' /etc/login.defs || echo -e 'HOME_MODE\t0700' >> /etc/login.defs
+sed -i 's/^#\?HOME_MODE.*/HOME_MODE\t0700/' /etc/login.defs || true
+
+# enable pam_faillock + pam_pwhistory drop-ins
+pam-auth-update --package --enable umbra-faillock || true
+pam-auth-update --package --enable umbra-pwhistory || true
+
+# enable core services
+systemctl enable nftables.service
+systemctl enable auditd.service
+systemctl enable chrony.service 2>/dev/null || systemctl enable chronyd.service || true
+systemctl enable jitterentropy-rngd.service 2>/dev/null || true
+
+# AppArmor: make sure the profile-loading service runs (else "no enforced profiles")
+systemctl unmask apparmor.service 2>/dev/null || true
+systemctl enable apparmor.service 2>/dev/null || true
+
+# systemd-resolved: unmask+enable and point resolv.conf at its stub so DoT is used
+systemctl unmask systemd-resolved.service 2>/dev/null || true
+systemctl enable systemd-resolved.service 2>/dev/null || true
+ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf 2>/dev/null || true
+
+# Belt-and-suspenders: a boot oneshot that force-starts AppArmor + resolved even in
+# the live environment (where enable-symlinks sometimes don't trigger a start).
+systemctl enable umbra-services.service 2>/dev/null || true
+# tor stays DISABLED until the user runs umbra-torswitch on
+systemctl disable tor.service 2>/dev/null || true
+# usbguard enabled post-install (needs a device policy first)
+
+# disable listening/attack-surface services
+for svc in avahi-daemon.service avahi-daemon.socket cups.service cups.socket \
+           cups-browsed.service rpcbind.service rpcbind.socket modemmanager.service; do
+    systemctl disable "$svc" 2>/dev/null || true
+    systemctl mask "$svc" 2>/dev/null || true
+done
+
+# tor: make it read our transparent-proxy drop-in
+grep -q 'torrc.d' /etc/tor/torrc 2>/dev/null || echo '%include /etc/tor/torrc.d/*.conf' >> /etc/tor/torrc
+
+# su restricted to sudo group
+sed -i 's/^# auth\(\s*\)required\(\s*\)pam_wheel.so$/auth\1required\2pam_wheel.so group=sudo/' /etc/pam.d/su || true
+
+# tighten sensitive perms
+chmod 700 /boot 2>/dev/null || true
+chmod 600 /etc/crontab 2>/dev/null || true
+chmod 700 /etc/cron.d /etc/cron.daily /etc/cron.hourly /etc/cron.weekly /etc/cron.monthly 2>/dev/null || true
+
+# APT hardening
+echo 'APT::Sandbox::Seccomp "true";' > /etc/apt/apt.conf.d/40sandbox
+cat > /etc/apt/apt.conf.d/52unattended-upgrades-local <<'EOF'
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "false";
+EOF
+
+# opsec: default to UTC so the timezone isn't a fingerprint
+ln -sf /usr/share/zoneinfo/UTC /etc/localtime || true
+
+# second-stage scripts executable
+chmod 755 /usr/local/sbin/umbra-*.sh || true
+
+echo "umbra: chroot hardening complete"

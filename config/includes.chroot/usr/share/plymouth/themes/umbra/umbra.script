@@ -1,0 +1,42 @@
+// Umbra OS Plymouth splash — centered logo, subtle pulsing corona, progress dots.
+Window.SetBackgroundTopColor(0.02, 0.03, 0.05);
+Window.SetBackgroundBottomColor(0.00, 0.00, 0.00);
+
+logo.image = Image("logo.png");
+logo.sprite = Sprite(logo.image);
+logo.w = logo.image.GetWidth();
+logo.h = logo.image.GetHeight();
+logo.sprite.SetX(Window.GetWidth()  / 2 - logo.w / 2);
+logo.sprite.SetY(Window.GetHeight() / 2 - logo.h / 2);
+
+// pulsing opacity to suggest a corona
+progress = 0;
+fun refresh() {
+    progress++;
+    o = 0.75 + 0.25 * Math.Sin(progress / 18);
+    logo.sprite.SetOpacity(o);
+}
+Plymouth.SetRefreshFunction(refresh);
+
+// password prompt for LUKS unlock
+fun ask(prompt, bullets) {
+    prompt_txt = Image.Text(prompt, 0.82, 0.86, 0.95);
+    prompt_sprite = Sprite(prompt_txt);
+    prompt_sprite.SetX(Window.GetWidth() / 2 - prompt_txt.GetWidth() / 2);
+    prompt_sprite.SetY(Window.GetHeight() * 0.72);
+    dots = "";
+    for (i = 0; i < bullets; i++) dots += "*";
+    dot_txt = Image.Text(dots, 0.82, 0.86, 0.95);
+    dot_sprite = Sprite(dot_txt);
+    dot_sprite.SetX(Window.GetWidth() / 2 - dot_txt.GetWidth() / 2);
+    dot_sprite.SetY(Window.GetHeight() * 0.76);
+}
+Plymouth.SetDisplayPasswordFunction(ask);
+
+fun msg(text) {
+    m = Image.Text(text, 0.6, 0.66, 0.8);
+    s = Sprite(m);
+    s.SetX(Window.GetWidth() / 2 - m.GetWidth() / 2);
+    s.SetY(Window.GetHeight() * 0.88);
+}
+Plymouth.SetMessageFunction(msg);

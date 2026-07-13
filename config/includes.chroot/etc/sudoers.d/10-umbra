@@ -1,0 +1,14 @@
+# Umbra OS — sudo hardening (installed 0440 by the hardening hook).
+# Allocate a pty (defeats some TTY-hijack escalations), log everything,
+# short credential caching, limit password attempts, ignore env by default.
+Defaults use_pty
+Defaults logfile="/var/log/sudo.log"
+Defaults log_input, log_output
+Defaults iolog_dir="/var/log/sudo-io"
+Defaults timestamp_timeout=5
+Defaults passwd_tries=3
+Defaults env_reset
+Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Defaults !visiblepw
+Defaults always_set_home
+Defaults match_group_by_gid

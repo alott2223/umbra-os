@@ -1,0 +1,6 @@
+Name: Umbra password history (block reuse of last 5 passwords)
+Default: yes
+Priority: 1024
+Password-Type: Primary
+Password:
+	requisite pam_pwhistory.so remember=5 use_authtok enforce_for_root

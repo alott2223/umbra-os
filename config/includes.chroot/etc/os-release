@@ -1,0 +1,11 @@
+PRETTY_NAME="Umbra OS (hardened Debian trixie)"
+NAME="Umbra OS"
+VERSION_ID="1.0"
+VERSION="1.0 (shadow)"
+VERSION_CODENAME=shadow
+ID=umbra
+ID_LIKE=debian
+HOME_URL="https://example.invalid/umbra"
+SUPPORT_URL="https://example.invalid/umbra/docs"
+BUG_REPORT_URL="https://example.invalid/umbra/issues"
+ANSI_COLOR="1;34"

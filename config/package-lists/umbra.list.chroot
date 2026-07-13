@@ -1,0 +1,153 @@
+# Umbra OS package set — minimal, security + opsec focused.
+# NOTE: live-build passes each non-# line straight to apt, so comments MUST be
+# on their own line (no trailing inline comments after a package name).
+
+# Kernel & firmware
+linux-image-amd64
+intel-microcode
+amd64-microcode
+fwupd
+
+# Mandatory Access Control
+apparmor
+apparmor-profiles
+apparmor-profiles-extra
+apparmor-utils
+libpam-apparmor
+
+# Firewall
+nftables
+
+# Auditing & integrity
+auditd
+audispd-plugins
+aide
+aide-common
+lynis
+debsums
+
+# Malware / rootkit detection (high-assurance)
+rkhunter
+chkrootkit
+clamav
+clamav-freshclam
+
+# Device control
+usbguard
+bolt
+
+# Crypto / disk
+cryptsetup
+cryptsetup-initramfs
+secure-delete
+
+# Time (NTS) & encrypted DNS
+chrony
+
+# Updates & hygiene
+unattended-upgrades
+apt-listchanges
+needrestart
+
+# PAM hardening
+libpam-pwquality
+libpam-tmpdir
+
+# Entropy
+jitterentropy-rngd
+
+# Secure Boot chain
+shim-signed
+grub-efi-amd64-signed
+
+# OPSEC — MAC spoofing
+macchanger
+
+# OPSEC — Tor transparent-proxy kill-switch backend
+tor
+torsocks
+
+# OPSEC — metadata scrubbing (strip EXIF / document metadata)
+mat2
+
+# OPSEC — local password vault
+keepassxc
+
+# OPSEC — hardened browser (system user.js applied by branding hook)
+firefox-esr
+
+# OPSEC — VPN kill-switch tooling
+wireguard-tools
+openssl
+
+# Branding toolchain (SVG rendering for wallpaper/splash)
+plymouth
+plymouth-themes
+librsvg2-bin
+
+# Desktop apps + Xorg + display manager come from GNOME task (apps kept),
+# but the DEFAULT desktop is the i3 tiling rice below.
+task-gnome-desktop
+
+# --- i3 tiling window manager rice (the real Umbra desktop) ---
+i3
+i3lock
+i3status
+polybar
+rofi
+picom
+alacritty
+feh
+dunst
+lightdm
+lightdm-gtk-greeter
+network-manager-gnome
+pavucontrol
+maim
+xclip
+brightnessctl
+x11-xserver-utils
+libnotify-bin
+lxappearance
+fonts-font-awesome
+fonts-hack
+fonts-terminus
+
+# --- extra desktop features / apps ---
+btop
+flameshot
+blueman
+playerctl
+redshift
+mpv
+imv
+
+# --- Umbra "cyber-dark" aesthetic ---
+# Themes (Yaru-purple-dark shell+GTK matches the logo accent)
+yaru-theme-gtk
+yaru-theme-gnome-shell
+papirus-icon-theme
+bibata-cursor-theme
+# Shell extensions: dock, frosted-glass blur, custom shell theme, tray
+gnome-shell-extensions
+gnome-shell-extension-user-theme
+gnome-shell-extension-dashtodock
+gnome-shell-extension-blur-my-shell
+gnome-shell-extension-appindicator
+gnome-tweaks
+# Fonts
+fonts-inter
+fonts-jetbrains-mono
+fonts-firacode
+fonts-cantarell
+# Terminal eye-candy
+fastfetch
+
+# Basics
+sudo
+ca-certificates
+curl
+gnupg
+git
+less
+vim-tiny

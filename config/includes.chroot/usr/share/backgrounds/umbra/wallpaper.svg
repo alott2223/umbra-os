@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080">
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6f8cff"/>
+      <stop offset="55%" stop-color="#5b6fe0"/>
+      <stop offset="100%" stop-color="#7a4fe0"/>
+    </linearGradient>
+    <linearGradient id="moon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c3c9d6"/>
+      <stop offset="100%" stop-color="#8b93a6"/>
+    </linearGradient>
+    <radialGradient id="bg" cx="50%" cy="40%" r="75%">
+      <stop offset="0%" stop-color="#141a2b"/>
+      <stop offset="55%" stop-color="#0b0f1c"/>
+      <stop offset="100%" stop-color="#05070d"/>
+    </radialGradient>
+    <!-- same crescent carve as the logo, centered on the wide canvas -->
+    <mask id="crescent">
+      <rect width="1920" height="1080" fill="black"/>
+      <circle cx="932" cy="452" r="120" fill="white"/>
+      <circle cx="996" cy="432" r="120" fill="black"/>
+    </mask>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+
+  <!-- faint starfield -->
+  <g fill="#8fa3c8" opacity="0.5">
+    <circle cx="220" cy="160" r="1.6"/><circle cx="480" cy="90" r="1.2"/>
+    <circle cx="1500" cy="140" r="1.8"/><circle cx="1720" cy="300" r="1.3"/>
+    <circle cx="300" cy="820" r="1.5"/><circle cx="1650" cy="820" r="1.6"/>
+    <circle cx="120" cy="520" r="1.2"/><circle cx="1810" cy="560" r="1.4"/>
+    <circle cx="700" cy="930" r="1.1"/><circle cx="1200" cy="120" r="1.3"/>
+  </g>
+
+  <!-- the same mark as the logo: ring + occluding disc + grey crescent -->
+  <circle cx="960" cy="452" r="150" fill="none" stroke="url(#ring)" stroke-width="14"/>
+  <circle cx="1034" cy="388" r="70" fill="url(#bg)"/>
+  <rect width="1920" height="1080" fill="url(#moon)" mask="url(#crescent)"/>
+
+  <text x="960" y="720" font-family="'DejaVu Sans','Arial',sans-serif" font-size="72"
+        font-weight="300" fill="#c9d4f0" text-anchor="middle" letter-spacing="24">UMBRA&#160;OS</text>
+  <text x="960" y="772" font-family="'DejaVu Sans','Arial',sans-serif" font-size="24"
+        font-weight="300" fill="#5f6f92" text-anchor="middle" letter-spacing="7">stay in the shadow</text>
+</svg>

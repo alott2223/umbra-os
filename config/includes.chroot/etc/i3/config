@@ -1,0 +1,177 @@
+# ██╗   ██╗███╗   ███╗██████╗ ██████╗  █████╗   i3 config
+# ██║   ██║████╗ ████║██╔══██╗██╔══██╗██╔══██╗  Umbra OS tiling desktop
+# ██║   ██║██╔████╔██║██████╔╝██████╔╝███████║  neon-on-black · purple accents
+# ╚██████╔╝██║ ╚═╝ ██║██████╔╝██║  ██║██║  ██║
+#  ╚═════╝ ╚═╝     ╚═╝╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝
+# Super = mod key. Super+Return terminal · Super+d apps · Super+? help
+
+set $mod Mod4
+set $term alacritty
+set $menu rofi -show drun -theme /etc/rofi/umbra.rasi
+set $run rofi -show run -theme /etc/rofi/umbra.rasi
+
+font pango:JetBrains Mono, Hack 10
+
+#--- Umbra neon palette ---
+set $bg      #05070d
+set $bgalt   #0b0f1c
+set $fg      #c9d4f0
+set $purple  #a855f7
+set $violet  #7c5cff
+set $cyan    #22d3ee
+set $magenta #ff5ecb
+set $green   #50fa7b
+set $red     #ff5555
+set $muted   #5f6f92
+
+#--- gaps + borders (i3 >= 4.22 has native gaps) ---
+gaps inner 10
+gaps outer 6
+smart_gaps on
+smart_borders on
+default_border pixel 2
+default_floating_border pixel 2
+hide_edge_borders smart
+title_align center
+
+#--- window colors:   border  bground text    indicator child_border
+client.focused          $purple  $purple  $bg     $cyan     $purple
+client.focused_inactive $bgalt   $bgalt   $muted  $bgalt    $bgalt
+client.unfocused        $bgalt   $bg      $muted  $bg       $bgalt
+client.urgent           $red     $red     #ffffff $red      $red
+client.placeholder      $bg      $bg      $fg     $bg       $bg
+client.background       $bg
+
+#=================== autostart ===================
+exec_always --no-startup-id picom --config /etc/xdg/picom.conf
+exec_always --no-startup-id feh --no-fehbg --bg-fill /usr/share/backgrounds/umbra/wallpaper.png
+exec_always --no-startup-id /etc/polybar/launch.sh
+exec --no-startup-id dunst
+exec --no-startup-id nm-applet
+exec --no-startup-id blueman-applet
+exec --no-startup-id flameshot
+exec --no-startup-id /usr/bin/pipewire 2>/dev/null
+# gentle screen lock on idle (10 min) using i3lock
+exec --no-startup-id xset s 600 600
+exec --no-startup-id xss-lock -- i3lock -n -c 05070d 2>/dev/null
+
+#=================== keybindings ===================
+floating_modifier $mod
+tiling_drag modifier titlebar
+
+bindsym $mod+Return exec $term
+bindsym $mod+d exec $menu
+bindsym $mod+Shift+d exec $run
+bindsym $mod+q kill
+bindsym $mod+Shift+q kill
+
+# focus (vim + arrows)
+bindsym $mod+h focus left
+bindsym $mod+j focus down
+bindsym $mod+k focus up
+bindsym $mod+l focus right
+bindsym $mod+Left focus left
+bindsym $mod+Down focus down
+bindsym $mod+Up focus up
+bindsym $mod+Right focus right
+
+# move
+bindsym $mod+Shift+h move left
+bindsym $mod+Shift+j move down
+bindsym $mod+Shift+k move up
+bindsym $mod+Shift+l move right
+bindsym $mod+Shift+Left move left
+bindsym $mod+Shift+Down move down
+bindsym $mod+Shift+Up move up
+bindsym $mod+Shift+Right move right
+
+# layout
+bindsym $mod+b split h
+bindsym $mod+v split v
+bindsym $mod+f fullscreen toggle
+bindsym $mod+s layout stacking
+bindsym $mod+w layout tabbed
+bindsym $mod+e layout toggle split
+bindsym $mod+Shift+space floating toggle
+bindsym $mod+space focus mode_toggle
+bindsym $mod+a focus parent
+
+# scratchpad
+bindsym $mod+Shift+minus move scratchpad
+bindsym $mod+minus scratchpad show
+
+# workspaces
+set $ws1 "1"
+set $ws2 "2"
+set $ws3 "3"
+set $ws4 "4"
+set $ws5 "5"
+set $ws6 "6"
+set $ws7 "7"
+set $ws8 "8"
+set $ws9 "9"
+set $ws10 "10"
+bindsym $mod+1 workspace number $ws1
+bindsym $mod+2 workspace number $ws2
+bindsym $mod+3 workspace number $ws3
+bindsym $mod+4 workspace number $ws4
+bindsym $mod+5 workspace number $ws5
+bindsym $mod+6 workspace number $ws6
+bindsym $mod+7 workspace number $ws7
+bindsym $mod+8 workspace number $ws8
+bindsym $mod+9 workspace number $ws9
+bindsym $mod+0 workspace number $ws10
+bindsym $mod+Shift+1 move container to workspace number $ws1
+bindsym $mod+Shift+2 move container to workspace number $ws2
+bindsym $mod+Shift+3 move container to workspace number $ws3
+bindsym $mod+Shift+4 move container to workspace number $ws4
+bindsym $mod+Shift+5 move container to workspace number $ws5
+bindsym $mod+Shift+6 move container to workspace number $ws6
+bindsym $mod+Shift+7 move container to workspace number $ws7
+bindsym $mod+Shift+8 move container to workspace number $ws8
+bindsym $mod+Shift+9 move container to workspace number $ws9
+bindsym $mod+Shift+0 move container to workspace number $ws10
+
+# apps / utilities
+bindsym $mod+g exec firefox-esr
+bindsym $mod+n exec nautilus
+bindsym $mod+p exec keepassxc
+bindsym $mod+Shift+slash exec $term --title "Umbra Help" -e umbra-help
+bindsym Print exec --no-startup-id flameshot gui
+bindsym $mod+Print exec --no-startup-id maim ~/umbra-$(date +%s).png
+bindsym $mod+shift+x exec --no-startup-id i3lock -n -c 05070d
+
+# audio / brightness
+bindsym XF86AudioRaiseVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ +5%
+bindsym XF86AudioLowerVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ -5%
+bindsym XF86AudioMute exec --no-startup-id pactl set-sink-mute @DEFAULT_SINK@ toggle
+bindsym XF86MonBrightnessUp exec --no-startup-id brightnessctl set 5%+
+bindsym XF86MonBrightnessDown exec --no-startup-id brightnessctl set 5%-
+
+# session
+bindsym $mod+Shift+c reload
+bindsym $mod+Shift+r restart
+bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'Log out of Umbra?' -B 'Yes' 'i3-msg exit'"
+
+# resize mode
+mode "resize" {
+    bindsym h resize shrink width 5 px or 5 ppt
+    bindsym j resize grow height 5 px or 5 ppt
+    bindsym k resize shrink height 5 px or 5 ppt
+    bindsym l resize grow width 5 px or 5 ppt
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+bindsym $mod+r mode "resize"
+
+# floating rules for dialogs/utility apps
+for_window [window_role="pop-up"] floating enable
+for_window [window_role="task_dialog"] floating enable
+for_window [class="Pavucontrol"] floating enable, resize set 700 500
+for_window [class="Lxappearance"] floating enable
+for_window [class="Nm-connection-editor"] floating enable
+for_window [class="Blueman-manager"] floating enable
+for_window [title="Umbra Help"] floating enable, resize set 760 620
+for_window [class="KeePassXC"] floating enable
+
+# i3bar is disabled; polybar is launched above.

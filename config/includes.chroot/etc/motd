@@ -1,0 +1,15 @@
+
+  Umbra OS — hardened Debian with an opsec layer.
+
+  ★ Security command center ....  umbra          (run it for the full menu)
+
+  Common:
+    umbra audit .......... full audit (verify + rootkit + integrity + updates)
+    umbra net ............ network exposure (IP, MAC, DNS, ports, Tor)
+    umbra scan <path> .... malware scan (ClamAV)
+    umbra tor on ......... route all traffic through Tor (kill-switch)
+    umbra scrub <file> ... strip metadata before sharing
+    umbra panic .......... emergency: cut net, wipe keys, power off
+
+  Controls & trade-offs documented in /usr/share/doc/umbra/.
+

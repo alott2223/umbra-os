@@ -1,0 +1,38 @@
+#!/bin/bash
+# Umbra OS — i3 keybinding cheatsheet (opened with Super+Shift+/).
+cat <<'EOF'
+
+   UMBRA OS · i3 tiling desktop — keybindings   (Super = Windows key)
+
+   NO SUPER KEY? (common in VirtualBox) — use the TASKBAR at the bottom:
+   click "≡ APPS" to launch anything, or the Firefox / Term / Files / Keys
+   / Settings / Monitor / Shot buttons. Everything is mouse-clickable.
+
+   Super+Return ....... terminal (alacritty)
+   Super+d ............ app launcher (rofi)
+   Super+Shift+d ...... run a command
+   Super+q ............ close window
+   Super+g / n / p .... Firefox / Files / KeePassXC
+
+   Super+h j k l ...... focus left/down/up/right  (or arrows)
+   Super+Shift+hjkl ... move window
+   Super+1..0 ......... switch workspace
+   Super+Shift+1..0 ... send window to workspace
+
+   Super+b / v ........ split horizontal / vertical
+   Super+f ............ fullscreen
+   Super+w / s / e .... tabbed / stacked / toggle split
+   Super+Shift+space .. float toggle
+   Super+r ............ resize mode (hjkl, Esc to exit)
+
+   Print .............. screenshot region -> clipboard
+   Super+Print ........ screenshot -> ~/umbra-*.png
+   Super+Shift+x ...... lock screen
+   Super+Shift+e ...... log out
+   Super+Shift+r ...... restart i3 (reload)
+
+   opsec:  umbra-verify.sh · umbra-torswitch · umbra-panic · scrub <file>
+
+   Press q to close this help.
+EOF
+read -n 1 -s -r

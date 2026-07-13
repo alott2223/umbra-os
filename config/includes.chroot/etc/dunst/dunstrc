@@ -1,0 +1,57 @@
+# Umbra OS — dunst notifications (neon-on-black).
+[global]
+    monitor = 0
+    follow = mouse
+    width = 340
+    height = (0, 200)
+    origin = top-right
+    offset = (16, 44)
+    scale = 0
+    notification_limit = 5
+    progress_bar = true
+    progress_bar_height = 8
+    progress_bar_frame_width = 1
+    indicate_hidden = yes
+    separator_height = 2
+    padding = 12
+    horizontal_padding = 14
+    frame_width = 2
+    frame_color = "#a855f7"
+    corner_radius = 12
+    gap_size = 6
+    sort = yes
+    font = JetBrains Mono 10
+    markup = full
+    format = "<b>%s</b>\n%b"
+    alignment = left
+    show_age_threshold = 60
+    ellipsize = middle
+    ignore_newline = no
+    stack_duplicates = true
+    show_indicators = yes
+    icon_position = left
+    min_icon_size = 24
+    max_icon_size = 48
+    enable_recursive_icon_lookup = true
+    icon_theme = "Papirus-Dark"
+    mouse_left_click = do_action, close_current
+    mouse_middle_click = close_all
+    mouse_right_click = close_current
+
+[urgency_low]
+    background = "#0b0f1c"
+    foreground = "#8fa3c8"
+    frame_color = "#243049"
+    timeout = 5
+
+[urgency_normal]
+    background = "#0b0f1c"
+    foreground = "#c9d4f0"
+    frame_color = "#a855f7"
+    timeout = 8
+
+[urgency_critical]
+    background = "#1a0b12"
+    foreground = "#ffffff"
+    frame_color = "#ff5555"
+    timeout = 0

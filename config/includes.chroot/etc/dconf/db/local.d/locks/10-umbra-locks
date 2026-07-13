@@ -1,0 +1,4 @@
+# Umbra OS — lock privacy-critical settings so they can't be silently changed back.
+/org/gnome/desktop/privacy/report-technical-problems
+/org/gnome/desktop/privacy/send-software-usage-stats
+/org/gnome/system/location/enabled
