@@ -32,6 +32,9 @@ jobs:
         id: assets
         run: |
           set -euo pipefail
+          # out/ and the ISO are owned by root (created by the privileged build
+          # container); take ownership so this non-root step can write here.
+          sudo chown -R "$(id -u):$(id -g)" out
           cd out
           ISO=umbra-os-amd64.hybrid.iso
           VER="${GITHUB_REF_NAME:-dev}"
