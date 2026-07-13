@@ -6,9 +6,9 @@ Wants=apparmor.service systemd-resolved.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-# Force-load AppArmor profiles and start encrypted-DNS resolver, even in the
-# live environment where the normal enable-symlinks sometimes don't trigger.
-ExecStart=/bin/sh -c 'systemctl restart apparmor.service 2>/dev/null || true; systemctl start systemd-resolved.service 2>/dev/null || true; ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf 2>/dev/null || true'
+# Force AppArmor + a working resolver (falls back to plain DNS if the hardened
+# path can't resolve — never leaves the box without DNS).
+ExecStart=/usr/local/sbin/umbra-boot-net.sh
 
 [Install]
 WantedBy=multi-user.target

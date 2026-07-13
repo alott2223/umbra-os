@@ -208,6 +208,14 @@ NFT
     age -d -o "$out" "$1" && echo "decrypted -> $out"
     ;;
 
+  dns)
+    case "${1:-status}" in
+      status) resolvectl status 2>/dev/null | grep -Ei 'DNS Servers|DNSOverTLS|Current DNS|Protocols' | sed 's/^/  /'; head "resolv.conf"; cat /etc/resolv.conf | sed 's/^/  /' ;;
+      secure) need_root "dns secure"; for i in $(resolvectl status 2>/dev/null | grep -oP 'Link \d+ \(\K[^)]+'); do resolvectl dnsovertls "$i" yes 2>/dev/null || true; done; ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf; systemctl restart systemd-resolved; echo "strict DNS-over-TLS re-enabled" ;;
+      *) echo "usage: umbra dns {status|secure}" ;;
+    esac
+    ;;
+
   updates)
     need_root updates
     head "applying security updates"; apt-get update && apt-get -y upgrade
