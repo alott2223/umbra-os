@@ -2,6 +2,24 @@
 
 All notable changes to Umbra OS are documented here.
 
+## v1.2 — "lean shadow"
+
+### Added
+- **GitHub Actions CI** — every `v*` tag builds the ISO on a runner (reliable network, so the
+  Graphite theme and everything else always build) and publishes it to the matching Release,
+  automatically single-file or split-if-over-2GiB.
+
+### Changed
+- **Slimmed the image.** Dropped the full GNOME desktop (GNOME Shell, LibreOffice, games — all
+  unused since Umbra boots i3) in favour of an explicit, lean X session: Xorg + VM/modern-GPU
+  drivers, PipeWire, `lxpolkit`, Thunar, and the settings/theme backends. Result: a smaller
+  download, faster boot, and **less attack surface** (fewer packages to ever patch).
+- File manager → **Thunar** (`Super+n` / taskbar **Files**); **Settings** taskbar button → a new
+  lightweight `umbra-settings` rofi menu (Network / Audio / Displays / Appearance / Bluetooth).
+- System-wide GTK dark theme (`/etc/gtk-3.0` + `gtk-4.0`) so apps stay on-brand under i3 without
+  GNOME's settings daemon.
+- squashfs now uses **xz** compression and drops the apt package indices from the image.
+
 ## v1.1 — "sharper shadow"
 
 ### Added

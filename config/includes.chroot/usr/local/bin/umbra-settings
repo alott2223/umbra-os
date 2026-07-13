@@ -1,0 +1,13 @@
+#!/bin/bash
+# Umbra OS — lightweight settings hub (rofi menu of standalone tools).
+choice=$(printf '  Network\n  Audio\n  Displays\n  Appearance\n  Bluetooth\n  Power / session' \
+  | rofi -dmenu -i -p "settings" -theme /etc/rofi/umbra.rasi 2>/dev/null)
+case "$choice" in
+  *Network)      nm-connection-editor & ;;
+  *Audio)        pavucontrol & ;;
+  *Displays)     arandr & ;;
+  *Appearance)   lxappearance & ;;
+  *Bluetooth)    blueman-manager & ;;
+  *"Power / session") umbra-powermenu ;;
+  *) exit 0 ;;
+esac

@@ -1,0 +1,68 @@
+name: build-iso
+
+# Build the Umbra OS ISO. On a version tag (v*) the ISO is published to the
+# matching GitHub Release; on a manual run it is uploaded as a workflow artifact.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          df -h /
+
+      - name: Build the ISO (Debian trixie container)
+        run: |
+          docker run --privileged -v "$PWD":/src debian:trixie \
+            bash /src/container-build.sh
+          ls -lh out/
+
+      - name: Assemble release assets
+        id: assets
+        run: |
+          set -euo pipefail
+          cd out
+          ISO=umbra-os-amd64.hybrid.iso
+          VER="${GITHUB_REF_NAME:-dev}"
+          mkdir -p ../release
+          sha256sum "$ISO" | tee "../release/umbra-os-${VER}-full.sha256"
+          size=$(stat -c%s "$ISO")
+          # GitHub caps release assets at 2 GiB; split if the image is larger.
+          if [ "$size" -gt 2147000000 ]; then
+            split -b 1900m "$ISO" "umbra-os-${VER}.iso.part-"
+            sha256sum umbra-os-${VER}.iso.part-* > SHA256SUMS
+            cp umbra-os-${VER}.iso.part-* SHA256SUMS ../release/
+            echo "kind=split (reassemble: cat umbra-os-${VER}.iso.part-* > umbra-os-${VER}.iso)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            cp "$ISO" "../release/umbra-os-${VER}.iso"
+            ( cd ../release && sha256sum "umbra-os-${VER}.iso" > SHA256SUMS )
+            echo "kind=single-file ($(numfmt --to=iec "$size"))" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          ls -lh ../release
+
+      - name: Upload build artifact (non-tag runs)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: umbra-os-iso
+          path: release/*
+          retention-days: 7
+
+      - name: Publish to the GitHub Release (tag runs)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

@@ -47,6 +47,7 @@ exec_always --no-startup-id picom --config /etc/xdg/picom.conf
 exec_always --no-startup-id feh --no-fehbg --bg-fill /usr/share/backgrounds/umbra/wallpaper.png
 exec_always --no-startup-id /etc/polybar/launch.sh
 exec --no-startup-id dunst
+exec --no-startup-id lxpolkit
 exec --no-startup-id nm-applet
 exec --no-startup-id blueman-applet
 exec --no-startup-id flameshot
@@ -136,7 +137,7 @@ bindsym $mod+Shift+0 move container to workspace number $ws10
 
 # apps / utilities
 bindsym $mod+g exec firefox-esr
-bindsym $mod+n exec nautilus
+bindsym $mod+n exec thunar
 bindsym $mod+p exec keepassxc
 bindsym $mod+Shift+slash exec $term --title "Umbra Help" -e umbra-help
 bindsym Print exec --no-startup-id flameshot gui

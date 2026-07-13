@@ -85,9 +85,49 @@ plymouth
 plymouth-themes
 librsvg2-bin
 
-# Desktop apps + Xorg + display manager come from GNOME task (apps kept),
-# but the DEFAULT desktop is the i3 tiling rice below.
-task-gnome-desktop
+# --- X session plumbing (explicit, instead of the full GNOME desktop) ---
+# We boot i3, so GNOME Shell + LibreOffice etc. were pure dead weight; this is the
+# lean set that makes an X session work in VMs and on modern hardware.
+xserver-xorg
+xserver-xorg-core
+xserver-xorg-input-libinput
+xserver-xorg-video-vmware
+xserver-xorg-video-qxl
+xserver-xorg-video-fbdev
+xserver-xorg-video-vesa
+xinit
+x11-utils
+dbus-x11
+xdg-utils
+xdg-user-dirs
+libgl1-mesa-dri
+# settings backend + schemas (GTK app theming + `dconf update`)
+dconf-cli
+dconf-gsettings-backend
+gsettings-desktop-schemas
+# polkit + a lightweight authentication agent
+polkitd
+lxpolkit
+# audio (PipeWire)
+pipewire
+pipewire-pulse
+pipewire-audio
+pipewire-alsa
+wireplumber
+# file manager + removable-media mounting + thumbnails + archives
+thunar
+thunar-volman
+tumbler
+gvfs
+gvfs-backends
+udisks2
+xarchiver
+# display arrangement
+arandr
+# core fonts GNOME used to pull in
+fonts-dejavu-core
+fonts-liberation2
+fonts-noto-core
 
 # --- i3 tiling window manager rice (the real Umbra desktop) ---
 i3
@@ -119,7 +159,6 @@ flameshot
 blueman
 playerctl
 redshift
-mpv
 imv
 
 # --- v1.1: CLI toolkit + crypto ---
@@ -135,18 +174,11 @@ tree
 jq
 
 # --- Umbra "cyber-dark" aesthetic ---
-# Themes (Yaru-purple-dark shell+GTK matches the logo accent)
+# GTK theme (used by thunar/lxappearance/etc.), icons, cursor
 yaru-theme-gtk
-yaru-theme-gnome-shell
 papirus-icon-theme
 bibata-cursor-theme
-# Shell extensions: dock, frosted-glass blur, custom shell theme, tray
-gnome-shell-extensions
-gnome-shell-extension-user-theme
-gnome-shell-extension-dashtodock
-gnome-shell-extension-blur-my-shell
-gnome-shell-extension-appindicator
-gnome-tweaks
+lxappearance
 # Fonts
 fonts-inter
 fonts-jetbrains-mono
