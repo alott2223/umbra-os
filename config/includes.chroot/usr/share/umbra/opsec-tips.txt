@@ -1,0 +1,22 @@
+Metadata is the leak you forget. Photos carry GPS, camera serials and timestamps; documents carry author and revision history. Run `umbra scrub <file>` before you ever share a file.
+Radios off = attack surface off. Not using Wi-Fi or Bluetooth right now? Turn them off — a radio that isn't transmitting can't be tracked or exploited.
+Your clock is a fingerprint. Umbra defaults to UTC on purpose; a local timezone narrows you to a region for every server you talk to.
+Verify, don't assume. After `umbra tor on`, run `umbra ip` — it confirms your traffic actually exits through Tor. "It started" is not "it's routing."
+A unique hostname follows you. Umbra names every machine `umbra` for a reason: a distinctive hostname leaks over DHCP and mDNS and links you across networks.
+The disk key lives in RAM. Encryption at rest only protects a powered-off machine. Stepping away? Lock the screen, or run `umbra panic` to evict the key from memory.
+Encryption is not anonymity. HTTPS and DoT hide *what* you send, not *that* you sent it. If you need to hide the connection itself, that's a job for Tor.
+Strong passphrase over clever password. Length beats symbols. Four or five random words you can remember beat `P@ssw0rd!` every time.
+Update on your terms, but update. `umbra updates` applies security fixes; unattended-upgrades does it automatically. An unpatched box is the easiest target.
+Check who logged in. `umbra logins` shows recent and failed logins. Unexpected entries or a flood of failures is your earliest warning.
+Compartmentalize identities. Don't log into a personal account over the same session you use anonymously — one careless login deanonymizes everything.
+Least privilege. Run as your user, not root. `sudo` when you must, and read what you're about to run before you paste it into a terminal.
+Trust the source, verify the file. `umbra hash <file>` gives a sha256 fingerprint — compare it to the publisher's before you run a download.
+USB is a weapon. Umbra's USBGuard blocks new devices by default. Don't plug in unknown drives, and don't authorize a device you didn't expect.
+Scan before you open. `umbra scan <file>` runs ClamAV. Attachments and downloads from anyone you don't fully trust deserve a look first.
+Know your exposure. `umbra net` shows your listening ports, DNS, MAC and public IP in one place. Fewer open ports means fewer doors.
+Kill switch, not hope. `umbra vpn <conf>` and `umbra tor on` fail closed — if the tunnel drops, traffic stops instead of leaking to the clear net.
+Wipe, don't just delete. Deleting a file leaves the data on disk. `umbra wipe <file>` overwrites it so it can't be recovered.
+Rotate your MAC. Umbra randomizes it per network by default; `umbra mac` re-randomizes on demand so venues can't recognize your hardware over time.
+Physical access is game over. A firmware password, Secure Boot, and full-disk encryption are the difference between a lost laptop and a data breach.
+The weakest link is habit. The best OS in the world can't save you from reusing a password or clicking a well-crafted link. Slow down on anything that creates urgency.
+Back up what you can't lose — encrypted. `umbra encrypt <file>` (age) protects a backup so a stolen copy is useless without your passphrase.

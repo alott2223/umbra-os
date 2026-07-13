@@ -63,23 +63,29 @@ AUDIT & DETECTION
    umbra logins        recent logins + failed attempts
 
 NETWORK & EXPOSURE
-   umbra net           exposure summary (IP, MAC, DNS, ports, Tor)
-   umbra ports         listening ports + owning processes
-   umbra ip            public IP + whether it exits via Tor
+   umbra net            exposure summary (IP, MAC, DNS, ports, Tor)
+   umbra ports          listening ports + owning processes
+   umbra ip             public IP + whether it exits via Tor
    umbra tor {on|off|status}   Tor transparent kill-switch
-   umbra mac           re-randomize your MAC address now
-   umbra firewall      show the active nftables ruleset
+   umbra vpn <conf>     WireGuard kill-switch (egress only via the tunnel)
+   umbra mac            re-randomize your MAC address now
+   umbra firewall       show the active nftables ruleset
 
 DATA & PRIVACY
-   umbra scrub <file>  strip metadata (EXIF/doc) before sharing
-   umbra wipe <file>   securely erase a file (unrecoverable)
-   umbra hash <file>   sha256 fingerprint for integrity
-   umbra lock          lock the screen now
+   umbra scrub <file>   strip metadata (EXIF/doc) before sharing
+   umbra wipe <file>    securely erase a file (unrecoverable)
+   umbra encrypt <file> encrypt a file with a passphrase (age)
+   umbra decrypt <file> decrypt a .age file
+   umbra hash <file>    sha256 fingerprint for integrity
+   umbra lock           lock the screen now
+
+KNOW-HOW
+   umbra tip            a daily operational-security tip (--all to browse)
 
 MAINTENANCE & EMERGENCY
-   umbra updates       apply security updates
-   umbra panic         emergency: cut net, wipe keys, power off
-   umbra hardened-malloc   enable the hardened memory allocator
+   umbra updates        apply security updates
+   umbra panic          emergency: cut net, wipe keys, power off
+   umbra hardened-malloc   toggle the hardened memory allocator
 ```
 
 ---
@@ -181,13 +187,14 @@ umbra-os/
 - **[docs/OPSEC.md](docs/OPSEC.md)** — the opsec layer, the Tor kill-switch design, and its limits.
 
 ## Known limitations
-- **hardened_malloc & the Graphite GTK theme** are built from source at image-build time; on a
-  flaky network they're skipped gracefully (hardened_malloc stays available via
-  `umbra hardened-malloc`). Everything else is network-independent.
+- **hardened_malloc** ships pre-built (a portable, `CONFIG_NATIVE=false` shared object vendored in
+  the repo), so it is always enabled. The optional **Graphite GTK theme** is still built at image
+  time and needs the network; if it's unavailable the build falls back to the packaged
+  Yaru-purple-dark theme.
 - The **live ISO boot menu** still shows Debian's default splash (the installed system's GRUB is
   themed).
-- **VirtualBox** may not forward the Super key to the guest — the taskbar is the mouse-driven
-  fallback.
+- **VirtualBox** may not forward the Super key to the guest — the taskbar (≡ APPS, quick-launch,
+  ✕ Close) is the mouse-driven fallback.
 
 ## Not a goal
 Not Tails (Umbra is persistent, not amnesic). Not Whonix (same-host Tor is weaker than an isolated

@@ -1,49 +1,33 @@
 #!/bin/bash
-# Umbra OS — premium theme + hardened_malloc, then strip the build toolchain.
-# NOTE: deliberately NOT 'set -e' — network/build steps degrade gracefully so a
-# transient failure never breaks the ISO (it just falls back to the packaged theme).
+# Umbra OS — enable the vendored hardened_malloc + (optionally) the Graphite theme.
+# hardened_malloc ships pre-built via includes.chroot (portable, no -march=native),
+# so it is GUARANTEED regardless of build-time network. The Graphite GTK theme is a
+# cosmetic bonus that needs the network; if it fails, Yaru-purple-dark is the fallback.
 set -uo pipefail
 export DEBIAN_FRONTEND=noninteractive
+echo "umbra: premium hook (hardened_malloc + optional theme)"
 
-echo "umbra: premium hook (theme + hardened_malloc)"
-
-# retry <n> <cmd...> — retry a flaky (often DNS) network command a few times
-retry() { local n=$1; shift; local i=1; while [ $i -le "$n" ]; do "$@" && return 0; echo "umbra: retry $i/$n failed: $*"; sleep 8; i=$((i+1)); done; return 1; }
-
-BUILD_DEPS="git build-essential sassc"
-retry 5 apt-get update -qq || true
-retry 5 apt-get install -y --no-install-recommends $BUILD_DEPS || true
-
-# --- hardened_malloc (GrapheneOS), 'light' variant = app-compatible, system-wide ---
-if command -v make >/dev/null && command -v git >/dev/null; then
-    tmp=$(mktemp -d)
-    if retry 5 git clone --depth 1 https://github.com/GrapheneOS/hardened_malloc "$tmp/hm"; then
-        if make -C "$tmp/hm" VARIANT=light >/dev/null 2>&1; then
-            install -m0644 "$tmp/hm/out-light/libhardened_malloc-light.so" \
-                /usr/lib/libhardened_malloc.so
-            # System-wide preload. 'light' is chosen for compatibility; a user can
-            # revert with: sudo umbra-hardened-malloc.sh --disable
-            echo /usr/lib/libhardened_malloc.so > /etc/ld.so.preload
-            echo "umbra: hardened_malloc ENABLED (light, system-wide)"
-        else
-            echo "umbra: hardened_malloc build failed, skipping preload"
-        fi
-    fi
-    rm -rf "$tmp"
+# --- hardened_malloc: vendored portable .so, just switch on the system-wide preload ---
+if [ -f /usr/lib/libhardened_malloc.so ]; then
+    echo /usr/lib/libhardened_malloc.so > /etc/ld.so.preload
+    echo "umbra: hardened_malloc ENABLED (vendored portable build, system-wide)"
+else
+    echo "umbra: WARNING no vendored hardened_malloc found — skipping preload"
 fi
 
-# --- Graphite premium theme (Obsidian/purple), dark ---
-if command -v git >/dev/null; then
+# --- Graphite premium theme (optional; needs network; Yaru is the fallback) ---
+retry(){ local n=$1; shift; local i=1; while [ $i -le "$n" ]; do "$@" && return 0; sleep 6; i=$((i+1)); done; return 1; }
+if retry 3 apt-get update -qq && retry 3 apt-get install -y --no-install-recommends git sassc >/dev/null 2>&1; then
     tmp=$(mktemp -d)
-    if retry 5 git clone --depth 1 https://github.com/vinceliuice/Graphite-gtk-theme "$tmp/g"; then
+    if retry 3 git clone --depth 1 https://github.com/vinceliuice/Graphite-gtk-theme "$tmp/g" 2>/dev/null; then
         "$tmp/g/install.sh" -c dark -t purple --tweaks rimless -d /usr/share/themes >/dev/null 2>&1 \
-          || "$tmp/g/install.sh" -c dark -t purple -d /usr/share/themes >/dev/null 2>&1 \
-          || echo "umbra: Graphite install failed"
+          || "$tmp/g/install.sh" -c dark -t purple -d /usr/share/themes >/dev/null 2>&1 || true
     fi
     rm -rf "$tmp"
+    apt-get purge -y git sassc >/dev/null 2>&1 || true
+    apt-get autoremove -y --purge >/dev/null 2>&1 || true
 fi
 
-# Detect the installed Graphite dark+purple theme and make it active (else keep Yaru)
 GRAPHITE_NAME=$(ls -d /usr/share/themes/Graphite* 2>/dev/null | xargs -n1 basename 2>/dev/null \
     | grep -i purple | grep -i dark | grep -vi light | head -1 || true)
 if [ -n "$GRAPHITE_NAME" ]; then
@@ -53,15 +37,10 @@ gtk-theme='$GRAPHITE_NAME'
 [org/gnome/shell/extensions/user-theme]
 name='$GRAPHITE_NAME'
 EOF
-    echo "umbra: premium theme active -> $GRAPHITE_NAME"
+    echo "umbra: premium theme -> $GRAPHITE_NAME"
 else
-    echo "umbra: Graphite unavailable, keeping Yaru-purple-dark"
+    echo "umbra: keeping Yaru-purple-dark (Graphite unavailable)"
 fi
 dconf update 2>/dev/null || true
-
-# --- strip the build toolchain: no compiler on the hardened target ---
-apt-get purge -y $BUILD_DEPS 2>/dev/null || true
-apt-get autoremove -y --purge 2>/dev/null || true
 apt-get clean || true
-
 echo "umbra: premium hook complete"

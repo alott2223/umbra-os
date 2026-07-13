@@ -16,7 +16,8 @@ systemctl enable  lightdm.service 2>/dev/null || true
 ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.service 2>/dev/null || true
 
 # Make executables runnable
-chmod +x /etc/polybar/launch.sh /usr/local/bin/umbra-help /usr/local/bin/umbra 2>/dev/null || true
+chmod +x /etc/polybar/launch.sh /usr/local/bin/umbra-help /usr/local/bin/umbra \
+    /usr/local/bin/umbra-lock /usr/local/bin/umbra-powermenu 2>/dev/null || true
 
 # Ensure an i3 xsession exists (installed by the i3 package); sanity log.
 [ -f /usr/share/xsessions/i3.desktop ] && echo "umbra: i3 xsession present" \

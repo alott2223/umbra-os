@@ -122,6 +122,18 @@ redshift
 mpv
 imv
 
+# --- v1.1: CLI toolkit + crypto ---
+age
+neovim
+tmux
+ripgrep
+fzf
+ncdu
+htop
+zathura
+tree
+jq
+
 # --- Umbra "cyber-dark" aesthetic ---
 # Themes (Yaru-purple-dark shell+GTK matches the logo accent)
 yaru-theme-gtk

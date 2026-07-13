@@ -1,0 +1,12 @@
+#!/bin/bash
+# Umbra OS — rofi power menu (mouse or keyboard).
+choice=$(printf '  Lock\n  Logout\n  Suspend\n  Reboot\n  Shut down\n  Cancel' \
+  | rofi -dmenu -i -p "power" -theme /etc/rofi/umbra.rasi 2>/dev/null)
+case "$choice" in
+  *Lock)     umbra-lock ;;
+  *Logout)   i3-msg exit ;;
+  *Suspend)  systemctl suspend ;;
+  *Reboot)   systemctl reboot ;;
+  *"Shut down") systemctl poweroff ;;
+  *) exit 0 ;;
+esac

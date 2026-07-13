@@ -33,11 +33,21 @@ ${C}NETWORK & EXPOSURE${N}
    umbra mac           re-randomize your MAC address now
    umbra firewall      show the active nftables ruleset
 
+${C}NETWORK & EXPOSURE (cont.)${N}
+   umbra vpn <conf>    WireGuard kill-switch: only the tunnel may talk out
+   umbra vpn off       tear the VPN kill-switch down
+
 ${C}DATA & PRIVACY${N}
-   umbra scrub <file>  strip metadata (EXIF/doc) before sharing
-   umbra wipe <file>   securely erase a file (unrecoverable)
-   umbra hash <file>   sha256 fingerprint for integrity
-   umbra lock          lock the screen now
+   umbra scrub <file>   strip metadata (EXIF/doc) before sharing
+   umbra wipe <file>    securely erase a file (unrecoverable)
+   umbra encrypt <file> encrypt a file with a passphrase (age)
+   umbra decrypt <file> decrypt a .age file
+   umbra hash <file>    sha256 fingerprint for integrity
+   umbra lock           lock the screen now
+
+${C}KNOW-HOW${N}
+   umbra tip           a daily operational-security tip
+   umbra tip --all     browse every tip
 
 ${C}MAINTENANCE & EMERGENCY${N}
    umbra updates       apply security updates
@@ -142,7 +152,61 @@ case "$cmd" in
     sha256sum "$@"
     ;;
 
-  lock) exec i3lock -n -c 05070d ;;
+  lock) exec umbra-lock ;;
+
+  tip)
+    TIPS=/usr/share/umbra/opsec-tips.txt
+    [[ -f "$TIPS" ]] || { echo "no tips installed"; exit 1; }
+    if [[ "${1:-}" == "--all" ]]; then nl -ba "$TIPS" | sed 's/^/  /'; exit 0; fi
+    # deterministic tip-of-the-day (stable for the whole day)
+    n=$(wc -l < "$TIPS"); day=$(date +%j); idx=$(( (10#$day % n) + 1 ))
+    head "opsec tip of the day"; sed -n "${idx}p" "$TIPS" | fold -s -w 68 | sed 's/^/  /'
+    echo -e "\n${D}  more: umbra tip --all${N}"
+    ;;
+
+  vpn)
+    need_root vpn
+    KS=/etc/umbra/vpn-killswitch.nft
+    if [[ "${1:-}" == "off" ]]; then
+      head "tearing down VPN kill-switch"; nft flush ruleset; nft -f /etc/nftables.conf
+      for w in $(wg show interfaces 2>/dev/null); do wg-quick down "$w" 2>/dev/null || true; done
+      echo "VPN kill-switch off, normal firewall restored"; exit 0
+    fi
+    [[ $# -ge 1 && -f "$1" ]] || { echo "usage: umbra vpn <wireguard.conf> | off"; exit 1; }
+    have wg-quick || { echo "wireguard-tools not installed"; exit 1; }
+    head "bringing up WireGuard + kill-switch"
+    wg-quick up "$1"
+    wgif=$(basename "$1" .conf)
+    # only loopback + the wg interface may send traffic; everything else dropped
+    nft -f - <<NFT
+flush ruleset
+table inet umbra_vpn {
+  chain output {
+    type filter hook output priority 0; policy drop;
+    oif "lo" accept
+    oif "$wgif" accept
+    meta l4proto udp ct state new,established accept comment "wg handshake to endpoint"
+    ct state established,related accept
+  }
+  chain input { type filter hook input priority 0; policy drop; iif "lo" accept; iif "$wgif" accept; ct state established,related accept; }
+}
+NFT
+    echo "VPN kill-switch ACTIVE on $wgif — traffic leaves only through the tunnel."
+    echo "verify: umbra ip     ·     tear down: sudo umbra vpn off"
+    ;;
+
+  encrypt)
+    [[ $# -ge 1 && -f "$1" ]] || { echo "usage: umbra encrypt <file>"; exit 1; }
+    have age || { echo "age not installed"; exit 1; }
+    age -p -o "$1.age" "$1" && echo "encrypted -> $1.age  (original left in place; remove with: umbra wipe $1)"
+    ;;
+
+  decrypt)
+    [[ $# -ge 1 && -f "$1" ]] || { echo "usage: umbra decrypt <file.age>"; exit 1; }
+    have age || { echo "age not installed"; exit 1; }
+    out="${1%.age}"; [[ "$out" == "$1" ]] && out="$1.dec"
+    age -d -o "$out" "$1" && echo "decrypted -> $out"
+    ;;
 
   updates)
     need_root updates

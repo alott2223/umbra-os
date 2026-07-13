@@ -1,0 +1,11 @@
+#!/bin/bash
+# Umbra OS — branded screen lock (i3lock over the Umbra wallpaper).
+BG=/usr/share/backgrounds/umbra/wallpaper.png
+if command -v i3lock >/dev/null 2>&1; then
+    if [ -f "$BG" ]; then
+        exec i3lock -n -e -f -i "$BG"
+    else
+        exec i3lock -n -e -f -c 05070d
+    fi
+fi
+exec xset dpms force off

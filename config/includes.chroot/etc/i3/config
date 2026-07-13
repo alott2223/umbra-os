@@ -53,7 +53,9 @@ exec --no-startup-id flameshot
 exec --no-startup-id /usr/bin/pipewire 2>/dev/null
 # gentle screen lock on idle (10 min) using i3lock
 exec --no-startup-id xset s 600 600
-exec --no-startup-id xss-lock -- i3lock -n -c 05070d 2>/dev/null
+exec --no-startup-id xss-lock -- umbra-lock 2>/dev/null
+# daily opsec tip as a desktop notification, a few seconds after login
+exec --no-startup-id sh -c 'sleep 6; notify-send -u low "Umbra · opsec tip" "$(umbra tip 2>/dev/null | sed -n 3p)"'
 
 #=================== keybindings ===================
 floating_modifier $mod
@@ -139,7 +141,8 @@ bindsym $mod+p exec keepassxc
 bindsym $mod+Shift+slash exec $term --title "Umbra Help" -e umbra-help
 bindsym Print exec --no-startup-id flameshot gui
 bindsym $mod+Print exec --no-startup-id maim ~/umbra-$(date +%s).png
-bindsym $mod+shift+x exec --no-startup-id i3lock -n -c 05070d
+bindsym $mod+shift+x exec --no-startup-id umbra-lock
+bindsym $mod+Escape exec --no-startup-id umbra-powermenu
 
 # audio / brightness
 bindsym XF86AudioRaiseVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ +5%
