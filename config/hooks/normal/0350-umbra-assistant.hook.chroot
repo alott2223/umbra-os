@@ -1,0 +1,75 @@
+#!/bin/bash
+# Umbra OS — set up the local AI assistant (Umbra Assistant).
+# The assistant itself is stdlib-only Python and always works (retrieval mode).
+# This hook adds the optional local-LLM runtime (ollama) and desktop plumbing.
+set -uo pipefail
+echo "umbra: assistant hook"
+export DEBIAN_FRONTEND=noninteractive
+retry(){ local n=$1; shift; local i=1; while [ $i -le "$n" ]; do "$@" && return 0; sleep 5; i=$((i+1)); done; return 1; }
+
+# --- Optional: ollama for a fully-local LLM (offline after a model is pulled) ---
+# Best-effort: if the network hiccups, the assistant still runs in retrieval mode
+# and the user can install later with `umbra assistant llm setup`.
+if ! command -v ollama >/dev/null 2>&1; then
+    if retry 3 curl -fsSL https://ollama.com/install.sh -o /tmp/ollama.sh; then
+        sh /tmp/ollama.sh >/dev/null 2>&1 && echo "umbra: ollama installed" \
+            || echo "umbra: ollama install skipped (run: umbra assistant llm setup)"
+        rm -f /tmp/ollama.sh
+    else
+        echo "umbra: ollama download skipped (offline) — assistant runs in retrieval mode"
+    fi
+fi
+# Keep ollama OFF by default (opt-in, opsec); the user starts it when wanted.
+systemctl disable ollama.service 2>/dev/null || true
+
+# --- Localhost REST + MCP API service (opt-in; enable with: umbra assistant api on) ---
+cat > /etc/systemd/system/umbra-assistant.service <<'EOF'
+[Unit]
+Description=Umbra Assistant — local memory API (REST + MCP, localhost only)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/umbra-assistant serve --port 7717
+Restart=on-failure
+# hardening: no new privileges, private tmp, read-only system paths
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-write
+IPAddressAllow=localhost
+IPAddressDeny=any
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl disable umbra-assistant.service 2>/dev/null || true   # opt-in
+
+# --- Desktop launcher (shows in the Xfce/Whisker applications menu) ---
+cat > /usr/share/applications/umbra-assistant.desktop <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Umbra Assistant
+Comment=Your private, on-device AI assistant with memory
+Exec=xfce4-terminal --title "Umbra Assistant" -e "bash -lc 'umbra assistant; exec bash'"
+Icon=/usr/share/backgrounds/umbra/logo.png
+Terminal=false
+Categories=Utility;System;
+Keywords=AI;assistant;memory;umbra;
+EOF
+
+# --- Register the MCP endpoint for other assistants (Claude/Cursor/…) to discover ---
+mkdir -p /etc/umbra
+cat > /etc/umbra/assistant-mcp.json <<'EOF'
+{
+  "mcpServers": {
+    "umbra-memory": {
+      "type": "http",
+      "url": "http://127.0.0.1:7717/mcp",
+      "description": "Umbra Assistant shared memory (start: umbra assistant api on)"
+    }
+  }
+}
+EOF
+
+echo "umbra: assistant hook complete"

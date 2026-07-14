@@ -49,7 +49,16 @@ ${C}KNOW-HOW${N}
    umbra tip           a daily operational-security tip
    umbra tip --all     browse every tip
 
-${C}AI & AUTOMATION${N}
+${C}LOCAL AI ASSISTANT${N}  ${D}(private, offline, on-device)${N}
+   umbra assistant ask <q>       retrieval-augmented answer (local LLM)
+   umbra assistant remember <t>  store a memory (semantic graph)
+   umbra assistant recall <q>    search memory (semantic + relationships)
+   umbra assistant index all     learn this machine (files/software/procs)
+   umbra assistant capsule save  snapshot your whole working context
+   umbra assistant why <id>      why a memory is kept + its links
+   umbra assistant serve         REST + MCP API for other assistants
+
+${C}AI DESKTOP CONTROL${N}
    umbra ai status     what an AI agent can control + VNC/SSH state
    umbra ai screenshot see the screen (PNG)
    umbra ai click/type/key   act on the desktop (xdotool)
@@ -73,6 +82,7 @@ case "$cmd" in
   panic)    exec umbra-panic "$@" ;;
   tor)      exec umbra-torswitch "$@" ;;
   ai)       exec umbra-ai "$@" ;;
+  assistant|mem) exec umbra-assistant "$@" ;;
   hardened-malloc) exec umbra-hardened-malloc.sh "$@" ;;
 
   audit)

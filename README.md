@@ -198,6 +198,7 @@ umbra-os/
 - **[docs/HARDENING.md](docs/HARDENING.md)** — every hardening control, why it exists, and what it breaks.
 - **[docs/OPSEC.md](docs/OPSEC.md)** — the opsec layer, the Tor kill-switch design, and its limits.
 - **[docs/REDTEAM.md](docs/REDTEAM.md)** — the Red Team Edition toolkit, how to build it, and its authorized-use policy.
+- **[docs/ASSISTANT.md](docs/ASSISTANT.md)** — Umbra Assistant: the local, private AI with a semantic memory graph, computer understanding, Context Capsules, and a shared-memory MCP server.
 
 ## Known limitations
 - **hardened_malloc** ships pre-built (a portable, `CONFIG_NATIVE=false` shared object vendored in

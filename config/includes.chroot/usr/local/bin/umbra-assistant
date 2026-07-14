@@ -1,0 +1,506 @@
+#!/usr/bin/env python3
+# Umbra Assistant — a local, offline, privacy-first AI assistant for Umbra OS.
+#
+# Everything is on-device: a semantic MEMORY GRAPH (SQLite), COMPUTER
+# UNDERSTANDING (filesystem / software / process / git index), a local LLM via
+# ollama (retrieval-augmented, degrades gracefully when offline), CONTEXT
+# CAPSULES (snapshot & restore a whole working context), and CLI + localhost
+# REST + MCP interfaces so other assistants (Claude, Cursor, …) can share memory.
+#
+# Stdlib-only by design: it always runs with no network and no pip installs.
+# Optional accelerators are used *if present* (sentence-transformers, ollama).
+#
+# Data lives under ~/.local/share/umbra/ (0700). Nothing leaves the machine.
+import os, sys, re, json, math, time, sqlite3, hashlib, argparse, subprocess, urllib.request, urllib.error
+
+HOME = os.path.expanduser("~")
+DATA = os.path.join(HOME, ".local", "share", "umbra")
+DB   = os.path.join(DATA, "umbra.db")
+DIM  = 256
+OLLAMA = os.environ.get("UMBRA_OLLAMA", "http://127.0.0.1:11434")
+MODEL  = os.environ.get("UMBRA_MODEL", "llama3.2")
+_FTS = False   # set by db(): whether the FTS5 keyword index is available
+
+# ------------------------------------------------------------------ storage ---
+def db():
+    os.makedirs(DATA, mode=0o700, exist_ok=True)
+    try: os.chmod(DATA, 0o700)
+    except OSError: pass
+    c = sqlite3.connect(DB)
+    c.execute("PRAGMA journal_mode=WAL")
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS memories(
+      id INTEGER PRIMARY KEY, text TEXT, kind TEXT DEFAULT 'note',
+      project TEXT DEFAULT 'default', importance REAL DEFAULT 0.5,
+      source TEXT DEFAULT 'user', why TEXT DEFAULT '',
+      created REAL, last_used REAL, uses INTEGER DEFAULT 0,
+      pinned INTEGER DEFAULT 0, vec BLOB);
+    CREATE TABLE IF NOT EXISTS edges(
+      src INTEGER, dst INTEGER, rel TEXT DEFAULT 'related', weight REAL DEFAULT 1.0,
+      UNIQUE(src,dst,rel));
+    CREATE TABLE IF NOT EXISTS capsules(
+      name TEXT PRIMARY KEY, created REAL, data TEXT);
+    CREATE INDEX IF NOT EXISTS m_proj ON memories(project);
+    CREATE INDEX IF NOT EXISTS m_kind ON memories(kind);
+    """)
+    global _FTS
+    try:
+        c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS mem_fts USING fts5(text, content='memories', content_rowid='id')")
+        c.executescript("""
+        CREATE TRIGGER IF NOT EXISTS m_ai AFTER INSERT ON memories BEGIN
+          INSERT INTO mem_fts(rowid,text) VALUES (new.id,new.text); END;
+        CREATE TRIGGER IF NOT EXISTS m_ad AFTER DELETE ON memories BEGIN
+          INSERT INTO mem_fts(mem_fts,rowid,text) VALUES('delete',old.id,old.text); END;
+        """)
+        _FTS = True
+    except sqlite3.OperationalError:
+        _FTS = False
+    return c
+
+# ---------------------------------------------------------------- embeddings ---
+# Offline default: hashed character-trigram vector (cosine). Not a transformer,
+# but gives fuzzy semantic-ish recall with zero dependencies. If
+# sentence-transformers is installed we transparently use it instead.
+_ST = None
+def _try_st():
+    global _ST
+    if _ST is not None: return _ST
+    try:
+        from sentence_transformers import SentenceTransformer
+        _ST = SentenceTransformer(os.environ.get("UMBRA_EMB", "all-MiniLM-L6-v2"))
+    except Exception:
+        _ST = False
+    return _ST
+
+def embed(text):
+    st = _try_st()
+    if st:
+        try: return [float(x) for x in st.encode(text)]
+        except Exception: pass
+    v = [0.0]*DIM
+    t = re.sub(r"\s+", " ", (text or "").lower())
+    for i in range(max(len(t)-2, 1)):
+        g = t[i:i+3]
+        h = int(hashlib.blake2b(g.encode(), digest_size=8).hexdigest(), 16)
+        v[h % DIM] += 1.0
+        v[(h >> 8) % DIM] += 0.5
+    n = math.sqrt(sum(x*x for x in v)) or 1.0
+    return [x/n for x in v]
+
+def cos(a, b):
+    if not a or not b or len(a) != len(b): return 0.0
+    return sum(x*y for x, y in zip(a, b))
+
+def pack(v):   return json.dumps([round(x, 5) for x in v]).encode()
+def unpack(b):
+    try: return json.loads(b) if b else []
+    except Exception: return []
+
+# ------------------------------------------------------------------- memory ---
+def remember(text, kind="note", project="default", importance=0.5, source="user", why=""):
+    c = db(); now = time.time()
+    cur = c.execute(
+        "INSERT INTO memories(text,kind,project,importance,source,why,created,last_used,vec) "
+        "VALUES(?,?,?,?,?,?,?,?,?)",
+        (text, kind, project, importance, source, why, now, now, pack(embed(text))))
+    mid = cur.lastrowid; c.commit(); c.close()
+    return mid
+
+def _score(row, sim, now):
+    # importance blends explicit importance, semantic similarity, recency and use.
+    age_days = (now - (row["created"] or now)) / 86400.0
+    recency = math.exp(-age_days / 30.0)               # 30-day half-ish life
+    use = math.log1p(row["uses"] or 0) / 4.0
+    pin = 0.5 if row["pinned"] else 0.0
+    return 0.45*sim + 0.25*(row["importance"] or 0.5) + 0.15*recency + 0.10*use + pin
+
+def recall(query, project=None, k=6, expand=True):
+    c = db(); c.row_factory = sqlite3.Row; now = time.time()
+    rows = []
+    seen = set()
+    # 1) keyword prefilter (FTS if available) to keep it fast on big stores
+    if _FTS and query.strip():
+        q = " OR ".join(re.findall(r"\w+", query.lower())[:12]) or query
+        try:
+            for r in c.execute("SELECT m.* FROM mem_fts f JOIN memories m ON m.id=f.rowid "
+                               "WHERE mem_fts MATCH ? LIMIT 200", (q,)):
+                rows.append(r); seen.add(r["id"])
+        except sqlite3.OperationalError: pass
+    # 2) always also consider recent/important rows so semantic recall isn't keyword-bound
+    sql = "SELECT * FROM memories"
+    args = []
+    if project: sql += " WHERE project=?"; args.append(project)
+    sql += " ORDER BY last_used DESC LIMIT 400"
+    for r in c.execute(sql, args):
+        if r["id"] not in seen: rows.append(r); seen.add(r["id"])
+    qv = embed(query)
+    scored = []
+    for r in rows:
+        if project and r["project"] != project: continue
+        scored.append((_score(r, cos(qv, unpack(r["vec"])), now), r))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = scored[:k]
+    # 3) graph expansion: pull in neighbours of the best hits (relationships > similarity)
+    if expand and top:
+        ids = [r["id"] for _, r in top]
+        qmarks = ",".join("?"*len(ids))
+        for nb in c.execute(f"SELECT dst AS o FROM edges WHERE src IN ({qmarks}) "
+                            f"UNION SELECT src AS o FROM edges WHERE dst IN ({qmarks})",
+                            ids+ids):
+            if nb["o"] in seen: continue
+            r = c.execute("SELECT * FROM memories WHERE id=?", (nb["o"],)).fetchone()
+            if r: top.append((0.4, r)); seen.add(nb["o"])
+    # 4) mark used
+    for _, r in top:
+        c.execute("UPDATE memories SET uses=uses+1, last_used=? WHERE id=?", (now, r["id"]))
+    c.commit()
+    out = [(round(s, 3), {k: v for k, v in dict(r).items() if k != "vec"}) for s, r in top]
+    c.close(); return out
+
+def link(a, b, rel="related", weight=1.0):
+    c = db()
+    c.execute("INSERT OR REPLACE INTO edges(src,dst,rel,weight) VALUES(?,?,?,?)", (a, b, rel, weight))
+    c.commit(); c.close()
+
+def why(mid):
+    c = db(); c.row_factory = sqlite3.Row
+    r = c.execute("SELECT * FROM memories WHERE id=?", (mid,)).fetchone()
+    if not r: print("no such memory"); return
+    print(f"#{r['id']}  [{r['kind']}/{r['project']}]  {r['text']}")
+    print(f"  remembered because : {r['why'] or '(no reason recorded)'}")
+    print(f"  source ............ : {r['source']}")
+    print(f"  first seen ........ : {time.ctime(r['created'])}")
+    print(f"  used .............. : {r['uses']}x, last {time.ctime(r['last_used'])}")
+    print(f"  importance ........ : {r['importance']:.2f}{'  (pinned)' if r['pinned'] else ''}")
+    nb = c.execute("SELECT dst,rel FROM edges WHERE src=? UNION SELECT src,rel FROM edges WHERE dst=?",
+                   (mid, mid)).fetchall()
+    if nb: print("  connected to ...... : " + ", ".join(f"#{n[0]}({n[1]})" for n in nb))
+    c.close()
+
+def timeline(project=None, limit=30):
+    c = db(); c.row_factory = sqlite3.Row
+    sql = "SELECT * FROM memories"; args = []
+    if project: sql += " WHERE project=?"; args.append(project)
+    sql += " ORDER BY created DESC LIMIT ?"; args.append(limit)
+    for r in c.execute(sql, args):
+        print(f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(r['created']))}  "
+              f"[{r['kind']}/{r['project']}] #{r['id']}  {r['text'][:80]}")
+    c.close()
+
+def forget(dry=True, floor=0.18):
+    # Automatic forgetting of low-value memories: compute a decayed keep-score and
+    # drop the weakest (never pinned, never recently used). Dry-run by default.
+    c = db(); c.row_factory = sqlite3.Row; now = time.time(); doomed = []
+    for r in c.execute("SELECT * FROM memories WHERE pinned=0"):
+        age = (now - (r["created"] or now)) / 86400.0
+        keep = 0.5*(r["importance"] or 0.5) + 0.3*math.exp(-age/45.0) + 0.2*math.log1p(r["uses"])/4.0
+        if keep < floor and age > 3:
+            doomed.append((round(keep, 3), r["id"], r["text"][:60]))
+    doomed.sort()
+    for keep, mid, txt in doomed:
+        print(f"{'would forget' if dry else 'forgot'} #{mid} (keep={keep})  {txt}")
+        if not dry:
+            c.execute("DELETE FROM memories WHERE id=?", (mid,))
+            c.execute("DELETE FROM edges WHERE src=? OR dst=?", (mid, mid))
+    if not dry: c.commit()
+    print(f"\n{len(doomed)} memories {'to forget' if dry else 'forgotten'}"
+          f"{'  (run with --apply to delete)' if dry else ''}")
+    c.close()
+
+# ------------------------------------------------------ computer understanding ---
+def _project_for(path):
+    p = path
+    while p and p != os.path.dirname(p):
+        if os.path.isdir(os.path.join(p, ".git")): return os.path.basename(p)
+        p = os.path.dirname(p)
+    return "default"
+
+def index_fs(root, limit=4000):
+    root = os.path.abspath(root); proj = _project_for(root); n = 0
+    skip = {".git", "node_modules", "__pycache__", ".cache", "venv", ".venv"}
+    for dp, dn, fn in os.walk(root):
+        dn[:] = [d for d in dn if d not in skip and not d.startswith(".")]
+        for f in fn:
+            if n >= limit: break
+            fp = os.path.join(dp, f)
+            try: st = os.stat(fp)
+            except OSError: continue
+            remember(f"file: {os.path.relpath(fp, root)} ({st.st_size}b)", kind="file",
+                     project=proj, importance=0.3, source="fs-index",
+                     why=f"indexed from {root}")
+            n += 1
+    print(f"indexed {n} files under {root} (project '{proj}')")
+
+def index_software():
+    try:
+        out = subprocess.run(["dpkg-query", "-W", "-f=${Package}\t${Version}\n"],
+                             capture_output=True, text=True, timeout=60).stdout
+    except Exception as e:
+        print("software inventory unavailable:", e); return
+    n = 0
+    for line in out.splitlines():
+        if "\t" not in line: continue
+        pkg, ver = line.split("\t", 1)
+        remember(f"installed: {pkg} {ver}", kind="software", project="system",
+                 importance=0.2, source="dpkg", why="installed-software inventory")
+        n += 1
+    print(f"indexed {n} installed packages")
+
+def index_procs():
+    try:
+        out = subprocess.run(["ps", "-eo", "comm,pcpu,pmem", "--sort=-pcpu"],
+                             capture_output=True, text=True, timeout=20).stdout
+    except Exception as e:
+        print("process snapshot unavailable:", e); return
+    lines = out.splitlines()[1:21]
+    remember("top processes: " + "; ".join(l.strip() for l in lines[:10]),
+             kind="process", project="system", importance=0.15, source="ps",
+             why="running-process snapshot")
+    print(f"captured process snapshot ({len(lines)} rows)")
+
+# -------------------------------------------------------------- context capsule ---
+def _sh(cmd):
+    try: return subprocess.run(cmd, capture_output=True, text=True, timeout=15).stdout.strip()
+    except Exception: return ""
+
+def capsule_save(name):
+    cwd = os.getcwd()
+    data = {
+        "cwd": cwd,
+        "git_branch": _sh(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"]),
+        "git_head": _sh(["git", "-C", cwd, "rev-parse", "HEAD"]),
+        "git_status": _sh(["git", "-C", cwd, "status", "--short"]),
+        "recent_files": _sh(["bash", "-lc",
+            f"find {cwd!r} -type f -mmin -720 -not -path '*/.git/*' 2>/dev/null | head -25"]),
+        "windows": _sh(["umbra-ai", "windows"]),
+        "history": _sh(["bash", "-lc", "tail -20 ~/.bash_history 2>/dev/null"]),
+        "project": _project_for(cwd),
+    }
+    c = db()
+    c.execute("INSERT OR REPLACE INTO capsules(name,created,data) VALUES(?,?,?)",
+              (name, time.time(), json.dumps(data)))
+    c.commit(); c.close()
+    remember(f"context capsule '{name}' saved for {data['project']}", kind="capsule",
+             project=data["project"], importance=0.6, source="capsule",
+             why=f"snapshot of working context in {cwd}")
+    print(f"capsule '{name}' saved  (cwd, git@{data['git_head'][:8]}, "
+          f"{len(data['recent_files'].splitlines())} recent files, windows, history)")
+
+def capsule_restore(name):
+    c = db(); r = c.execute("SELECT data,created FROM capsules WHERE name=?", (name,)).fetchone()
+    c.close()
+    if not r: print(f"no capsule '{name}'"); return
+    d = json.loads(r[0])
+    print(f"── context capsule '{name}' — saved {time.ctime(r[1])} ──")
+    print(f"project : {d['project']}")
+    print(f"cwd     : {d['cwd']}")
+    print(f"git     : {d['git_branch']} @ {d['git_head'][:8]}")
+    if d["git_status"]: print("uncommitted:\n  " + d["git_status"].replace("\n", "\n  "))
+    if d["recent_files"]: print("recent files:\n  " + d["recent_files"].replace("\n", "\n  "))
+    if d["windows"]: print("windows:\n  " + d["windows"].replace("\n", "\n  "))
+    print(f"\nto resume: cd {d['cwd']!r}")
+
+# -------------------------------------------------------------------- local LLM ---
+def ollama_up():
+    try:
+        urllib.request.urlopen(OLLAMA + "/api/tags", timeout=2); return True
+    except Exception: return False
+
+def ollama_gen(prompt, model=MODEL):
+    body = json.dumps({"model": model, "prompt": prompt, "stream": False}).encode()
+    req = urllib.request.Request(OLLAMA + "/api/generate", data=body,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.loads(r.read()).get("response", "").strip()
+
+def ask(question, project=None, store=True):
+    hits = recall(question, project=project, k=6)
+    ctx = "\n".join(f"- {m['text']}" for _, m in hits)
+    if not ollama_up():
+        print("Local LLM (ollama) is not running — showing retrieved memory instead.\n")
+        if not hits: print("(no relevant memories yet)")
+        for s, m in hits: print(f"  [{s}] #{m['id']} {m['text']}")
+        print("\nStart a model with:  umbra assistant llm setup")
+        return
+    prompt = (f"You are Umbra Assistant, a private on-device helper. Use the user's memories "
+              f"below when relevant; say if they don't cover it.\n\nMEMORIES:\n{ctx or '(none)'}\n\n"
+              f"USER: {question}\nASSISTANT:")
+    try:
+        ans = ollama_gen(prompt)
+    except Exception as e:
+        print("LLM error:", e); return
+    print(ans)
+    if store:
+        qid = remember(f"Q: {question}", kind="chat", project=project or "default",
+                       importance=0.4, source="chat", why="you asked this")
+        aid = remember(f"A: {ans}", kind="chat", project=project or "default",
+                       importance=0.4, source="assistant", why="assistant answered")
+        link(qid, aid, "answered-by")
+        for _, m in hits: link(qid, m["id"], "used-context")
+
+def llm_setup():
+    if not _has("ollama"):
+        print("ollama is not installed.\nInstall (needs network):\n"
+              "  curl -fsSL https://ollama.com/install.sh | sh\n"
+              f"Then pull a small local model:\n  ollama pull {MODEL}")
+        return
+    print(f"ollama present. Pulling local model '{MODEL}' (offline after this)…")
+    subprocess.call(["ollama", "pull", MODEL])
+
+def _has(x):
+    from shutil import which; return which(x) is not None
+
+# --------------------------------------------------------------------- servers ---
+def serve(host="127.0.0.1", port=7717):
+    # Localhost-only REST + MCP so other assistants can share Umbra's memory.
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    TOOLS = [
+        {"name": "recall", "description": "Search Umbra memory (semantic + graph)",
+         "inputSchema": {"type": "object", "properties": {"query": {"type": "string"},
+                         "project": {"type": "string"}}, "required": ["query"]}},
+        {"name": "remember", "description": "Store a memory in Umbra",
+         "inputSchema": {"type": "object", "properties": {"text": {"type": "string"},
+                         "project": {"type": "string"}, "why": {"type": "string"}},
+         "required": ["text"]}},
+    ]
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def _send(self, obj, code=200):
+            b = json.dumps(obj).encode()
+            self.send_response(code); self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+        def _body(self):
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            try: return json.loads(self.rfile.read(n) or b"{}")
+            except Exception: return {}
+        def do_GET(self):
+            if self.path.startswith("/recall"):
+                from urllib.parse import urlparse, parse_qs
+                q = parse_qs(urlparse(self.path).query)
+                self._send([m for _, m in recall(q.get("query", [""])[0],
+                            project=(q.get("project", [None])[0]))])
+            elif self.path == "/health": self._send({"ok": True, "llm": ollama_up()})
+            else: self._send({"error": "not found"}, 404)
+        def do_POST(self):
+            d = self._body()
+            if self.path == "/remember":
+                self._send({"id": remember(d.get("text", ""), project=d.get("project", "default"),
+                            why=d.get("why", ""), source="api")})
+            elif self.path == "/ask":
+                hits = recall(d.get("question", ""), project=d.get("project"))
+                self._send({"memories": [m for _, m in hits], "llm": ollama_up()})
+            elif self.path == "/mcp":   # minimal JSON-RPC MCP
+                rid = d.get("id"); meth = d.get("method", "")
+                if meth == "initialize":
+                    self._send({"jsonrpc": "2.0", "id": rid, "result":
+                        {"protocolVersion": "2024-11-05", "serverInfo":
+                         {"name": "umbra-assistant", "version": "1"}, "capabilities": {"tools": {}}}})
+                elif meth == "tools/list":
+                    self._send({"jsonrpc": "2.0", "id": rid, "result": {"tools": TOOLS}})
+                elif meth == "tools/call":
+                    p = d.get("params", {}); name = p.get("name"); a = p.get("arguments", {})
+                    if name == "recall":
+                        res = [m for _, m in recall(a.get("query", ""), project=a.get("project"))]
+                        txt = "\n".join(f"#{m['id']} {m['text']}" for m in res) or "(nothing)"
+                    elif name == "remember":
+                        txt = f"stored #{remember(a.get('text',''), project=a.get('project','default'), why=a.get('why',''), source='mcp')}"
+                    else: txt = "unknown tool"
+                    self._send({"jsonrpc": "2.0", "id": rid,
+                                "result": {"content": [{"type": "text", "text": txt}]}})
+                else:
+                    self._send({"jsonrpc": "2.0", "id": rid,
+                                "error": {"code": -32601, "message": "method not found"}})
+            else: self._send({"error": "not found"}, 404)
+    print(f"Umbra Assistant API on http://{host}:{port}  (REST + MCP, localhost-only)")
+    ThreadingHTTPServer((host, port), H).serve_forever()
+
+# ------------------------------------------------------------------------ cli ---
+def main():
+    p = argparse.ArgumentParser(prog="umbra-assistant", description="Umbra local AI assistant")
+    sub = p.add_subparsers(dest="cmd")
+    def add(n, **kw): return sub.add_parser(n, **kw)
+
+    a = add("remember"); a.add_argument("text", nargs="+"); a.add_argument("--project", default="default")
+    a.add_argument("--kind", default="note"); a.add_argument("--why", default="")
+    a.add_argument("--importance", type=float, default=0.5); a.add_argument("--pin", action="store_true")
+
+    a = add("recall"); a.add_argument("query", nargs="+"); a.add_argument("--project"); a.add_argument("-k", type=int, default=6)
+    a = add("ask"); a.add_argument("question", nargs="+"); a.add_argument("--project")
+    a = add("why"); a.add_argument("id", type=int)
+    a = add("link"); a.add_argument("a", type=int); a.add_argument("b", type=int); a.add_argument("--rel", default="related")
+    a = add("timeline"); a.add_argument("--project"); a.add_argument("-n", type=int, default=30)
+    a = add("forget"); a.add_argument("--apply", action="store_true")
+    a = add("index"); a.add_argument("what", choices=["fs", "software", "procs", "all"]); a.add_argument("--path", default=".")
+    a = add("capsule"); a.add_argument("action", choices=["save", "restore", "list"]); a.add_argument("name", nargs="?", default="")
+    add("llm").add_argument("action", choices=["setup", "status"])
+    a = add("serve"); a.add_argument("--port", type=int, default=7717)
+    add("api").add_argument("action", choices=["on", "off", "status"])
+    add("stats"); add("status")
+
+    args = p.parse_args()
+    cmd = args.cmd or "status"
+
+    if cmd == "remember":
+        mid = remember(" ".join(args.text), kind=args.kind, project=args.project,
+                       importance=args.importance, source="user", why=args.why)
+        if args.pin: c = db(); c.execute("UPDATE memories SET pinned=1 WHERE id=?", (mid,)); c.commit(); c.close()
+        print(f"remembered #{mid}")
+    elif cmd == "recall":
+        for s, m in recall(" ".join(args.query), project=args.project, k=args.k):
+            print(f"[{s}] #{m['id']} ({m['kind']}/{m['project']}) {m['text']}")
+    elif cmd == "ask":     ask(" ".join(args.question), project=args.project)
+    elif cmd == "why":     why(args.id)
+    elif cmd == "link":    link(args.a, args.b, args.rel); print(f"linked #{args.a}—#{args.b} ({args.rel})")
+    elif cmd == "timeline":timeline(project=args.project, limit=args.n)
+    elif cmd == "forget":  forget(dry=not args.apply)
+    elif cmd == "index":
+        if args.what in ("fs", "all"):       index_fs(args.path)
+        if args.what in ("software", "all"): index_software()
+        if args.what in ("procs", "all"):    index_procs()
+    elif cmd == "capsule":
+        if args.action == "save":    capsule_save(args.name or "default")
+        elif args.action == "restore": capsule_restore(args.name or "default")
+        else:
+            c = db()
+            for n, t in c.execute("SELECT name,created FROM capsules ORDER BY created DESC"):
+                print(f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(t))}  {n}")
+            c.close()
+    elif cmd == "llm":
+        if args.action == "setup": llm_setup()
+        else: print("ollama:", "running" if ollama_up() else "not running", "· model:", MODEL)
+    elif cmd == "serve":   serve(port=args.port)
+    elif cmd == "api":
+        svc = "umbra-assistant.service"
+        if args.action == "status":
+            os.system(f"systemctl is-enabled {svc} 2>/dev/null; systemctl is-active {svc} 2>/dev/null")
+        elif os.geteuid() != 0:
+            print(f"needs sudo:  sudo umbra assistant api {args.action}")
+        elif args.action == "on":
+            os.system(f"systemctl enable --now {svc}"); print("Umbra Assistant API on http://127.0.0.1:7717 (localhost)")
+        else:
+            os.system(f"systemctl disable --now {svc}"); print("API stopped")
+    elif cmd == "stats":
+        c = db()
+        tot = c.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+        eg  = c.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
+        print(f"memories: {tot}   relationships: {eg}   db: {DB}")
+        for k, n in c.execute("SELECT kind,COUNT(*) FROM memories GROUP BY kind ORDER BY 2 DESC"):
+            print(f"  {n:>5}  {k}")
+        c.close()
+    else:
+        print("Umbra Assistant — local, private AI with memory.")
+        print("  umbra assistant remember <text> [--project P --why R --pin]")
+        print("  umbra assistant recall <query>        semantic + graph search")
+        print("  umbra assistant ask <question>        retrieval-augmented, local LLM")
+        print("  umbra assistant timeline / why <id>   provenance & history")
+        print("  umbra assistant index fs|software|procs|all   understand this machine")
+        print("  umbra assistant capsule save|restore <name>   context capsules")
+        print("  umbra assistant forget [--apply]      prune low-value memories")
+        print("  umbra assistant serve                 REST + MCP API (localhost)")
+        print("  umbra assistant stats                 memory-graph statistics")
+        print("  emb:", "transformer" if _try_st() else "offline-hash",
+              "· llm:", "up" if ollama_up() else "down")
+
+if __name__ == "__main__":
+    try: main()
+    except KeyboardInterrupt: pass
