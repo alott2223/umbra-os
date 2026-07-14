@@ -55,9 +55,16 @@ command -v gem >/dev/null 2>&1 && retry 2 gem install --no-document wpscan >/dev
     && echo "umbra: wpscan installed" || echo "umbra: wpscan skipped"
 
 # --- netexec (modern CrackMapExec) via pipx, system-wide ---
+# Installed from its git repo (NetExec is not published to PyPI). Build deps are in
+# the package list; stderr is kept for diagnosis (impacket also covers this ground).
 if command -v pipx >/dev/null 2>&1; then
-    PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin retry 2 pipx install netexec >/dev/null 2>&1 \
-        && echo "umbra: netexec installed" || echo "umbra: netexec skipped"
+    if PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin PIP_PREFER_BINARY=1 \
+        retry 3 pipx install "git+https://github.com/Pennyw0rth/NetExec" \
+        >/var/log/umbra-redteam-netexec.log 2>&1; then
+        echo "umbra: netexec installed (nxc)"
+    else
+        echo "umbra: netexec skipped (see /var/log/umbra-redteam-netexec.log; impacket covers most of it)"
+    fi
 fi
 
 # --- wordlists (rockyou) ---

@@ -53,6 +53,11 @@ xxd
 ruby-dev
 libpcap-dev
 git
+# --- build deps so pipx/gem can compile source-only Python 3.13 / native deps ---
+build-essential
+python3-dev
+libffi-dev
+libssl-dev
 # --- runtime / scripting for the extra tooling ---
 python3-pip
 pipx
