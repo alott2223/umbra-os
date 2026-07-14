@@ -15,7 +15,8 @@ cd /build
 # Defensive: normalize line endings and exec bits lost on Windows checkouts
 find /build -type f \( -name "*.sh" -o -name "*.hook.chroot" -o -name "*.conf" \
     -o -name "*.cfg" -o -name "*.rules" -o -name "*.chroot" -o -name "*.script" \
-    -o -name "*.nft" -o -name "*.plymouth" \) -exec sed -i 's/\r$//' {} +
+    -o -name "*.nft" -o -name "*.plymouth" -o -name "*.xml" -o -name "*.rc" \
+    -o -name "*.desktop" -o -name "*.service" \) -exec sed -i 's/\r$//' {} +
 # The /usr/local/{bin,sbin} helper scripts are extension-less, so normalize them
 # explicitly (a stray \r in the shebang breaks them at runtime) and make runnable.
 for d in bin sbin; do
