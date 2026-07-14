@@ -119,6 +119,18 @@ sudo ./build.sh
 The build runs entirely inside a Debian container/chroot; only the finished ISO is written to
 `out/`. A SHA-256 sum is produced alongside it.
 
+### Red Team Edition
+
+The same hardened base plus a curated offensive toolkit (Metasploit, nmap/masscan, sqlmap,
+gobuster/ffuf, hydra/john/hashcat, wireshark/bettercap, aircrack-ng, impacket, responder,
+netexec, searchsploit, rockyou, and more) for **authorized** pentesting, CTFs, and research:
+
+```bash
+UMBRA_EDITION=redteam sudo ./build.sh      # -> out/umbra-os-redteam-amd64.hybrid.iso
+```
+
+See **[docs/REDTEAM.md](docs/REDTEAM.md)** for the full toolkit, CI build, and the authorized-use policy.
+
 ## Testing
 
 - **QEMU:** `qemu-system-x86_64 -machine q35 -m 4096 -cdrom out/umbra-os-amd64.hybrid.iso …`
@@ -185,6 +197,7 @@ umbra-os/
 ## Documentation
 - **[docs/HARDENING.md](docs/HARDENING.md)** — every hardening control, why it exists, and what it breaks.
 - **[docs/OPSEC.md](docs/OPSEC.md)** — the opsec layer, the Tor kill-switch design, and its limits.
+- **[docs/REDTEAM.md](docs/REDTEAM.md)** — the Red Team Edition toolkit, how to build it, and its authorized-use policy.
 
 ## Known limitations
 - **hardened_malloc** ships pre-built (a portable, `CONFIG_NATIVE=false` shared object vendored in

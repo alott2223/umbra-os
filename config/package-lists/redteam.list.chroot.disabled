@@ -1,0 +1,60 @@
+# Umbra OS — Red Team Edition offensive toolkit (Debian-available tools).
+# Enabled only when building with UMBRA_EDITION=redteam. Marquee tools that aren't
+# in Debian (metasploit, nikto, wpscan, searchsploit, responder, enum4linux,
+# netexec, rockyou) are added by the 0400-umbra-redteam hook via their own native
+# installers — NOT the Kali repo, which conflicts with Debian stable.
+#
+# FOR AUTHORIZED SECURITY TESTING, CTFs, RESEARCH, AND TRAINING ONLY.
+
+# --- recon / OSINT / scanning ---
+nmap
+masscan
+whatweb
+wafw00f
+dnsrecon
+dnsenum
+whois
+bind9-dnsutils
+net-tools
+# --- web app testing ---
+gobuster
+ffuf
+dirb
+sqlmap
+# --- traffic capture / MITM ---
+wireshark
+tshark
+tcpdump
+bettercap
+# --- wireless ---
+aircrack-ng
+reaver
+# --- password / hash cracking ---
+hydra
+medusa
+john
+hashcat
+hashid
+crunch
+cewl
+# --- SMB / AD / post-exploitation ---
+smbclient
+python3-impacket
+# --- pivoting / tunneling ---
+proxychains4
+socat
+# --- reversing / forensics / stego ---
+binwalk
+foremost
+libimage-exiftool-perl
+steghide
+xxd
+# --- extra CLI helpers used by the toolkit ---
+ruby-dev
+libpcap-dev
+git
+# --- runtime / scripting for the extra tooling ---
+python3-pip
+pipx
+golang-go
+ruby

@@ -6,6 +6,12 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      edition:
+        description: 'Edition to build'
+        type: choice
+        options: [base, redteam]
+        default: base
 
 permissions:
   contents: write
@@ -24,8 +30,8 @@ jobs:
 
       - name: Build the ISO (Debian trixie container)
         run: |
-          docker run --privileged -v "$PWD":/src debian:trixie \
-            bash /src/container-build.sh
+          docker run --privileged -e UMBRA_EDITION="${{ github.event.inputs.edition || 'base' }}" \
+            -v "$PWD":/src debian:trixie bash /src/container-build.sh
           ls -lh out/
 
       - name: Assemble release assets
@@ -36,7 +42,7 @@ jobs:
           # container); take ownership so this non-root step can write here.
           sudo chown -R "$(id -u):$(id -g)" out
           cd out
-          ISO=umbra-os-amd64.hybrid.iso
+          ISO=$(ls *.hybrid.iso | head -1)
           VER="${GITHUB_REF_NAME:-dev}"
           mkdir -p ../release
           sha256sum "$ISO" | tee "../release/umbra-os-${VER}-full.sha256"

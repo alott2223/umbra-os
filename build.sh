@@ -15,10 +15,23 @@ if ! command -v lb >/dev/null 2>&1; then
 fi
 
 DIST="${UMBRA_DIST:-trixie}"
+EDITION="${UMBRA_EDITION:-base}"        # base | redteam
 WORK=work
 mkdir -p "$WORK" out
 cp -a config "$WORK/"
 cd "$WORK"
+
+# Edition selection: enable the redteam package list + hook, and name the image.
+ISO_APP="Umbra OS"; ISO_VOL="UMBRA"; ISO_NAME="umbra-os-amd64.hybrid.iso"
+if [ "$EDITION" = "redteam" ]; then
+    echo "==> building the RED TEAM edition"
+    for f in config/package-lists/redteam.list.chroot.disabled \
+             config/hooks/normal/0400-umbra-redteam.hook.chroot.disabled; do
+        [ -f "$f" ] && mv -f "$f" "${f%.disabled}"
+    done
+    chmod +x config/hooks/normal/0400-umbra-redteam.hook.chroot 2>/dev/null || true
+    ISO_APP="Umbra OS Red Team"; ISO_VOL="UMBRA-RT"; ISO_NAME="umbra-os-redteam-amd64.hybrid.iso"
+fi
 
 lb config \
     --distribution "$DIST" \
@@ -33,13 +46,13 @@ lb config \
     --security true \
     --updates true \
     --apt-secure true \
-    --iso-application "Umbra OS" \
+    --iso-application "$ISO_APP" \
     --iso-publisher "Umbra OS Project" \
-    --iso-volume "UMBRA"
+    --iso-volume "$ISO_VOL"
 
 lb build
 
-mv -f live-image-amd64.hybrid.iso ../out/umbra-os-amd64.hybrid.iso
+mv -f live-image-amd64.hybrid.iso "../out/$ISO_NAME"
 echo
-echo "Done: out/umbra-os-amd64.hybrid.iso"
+echo "Done: out/$ISO_NAME"
 echo "After install, run: umbra-harden-install.sh  then  umbra-verify.sh"

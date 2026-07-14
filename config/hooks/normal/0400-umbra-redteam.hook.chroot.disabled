@@ -1,0 +1,106 @@
+#!/bin/bash
+# Umbra OS — Red Team Edition hook. Enabled only for UMBRA_EDITION=redteam.
+#
+# Installs the marquee offensive tools that aren't in Debian using their NATIVE,
+# self-contained methods (NOT the Kali repo, which conflicts with Debian stable):
+#   * Metasploit  -> Rapid7's official apt repo (self-contained omnibus)
+#   * searchsploit/nikto/responder/enum4linux -> git clones into /opt + symlinks
+#   * wpscan -> RubyGems ; netexec -> pipx
+# Every step is independent and graceful: a failure just skips that one tool, the
+# 30+ Debian-packaged tools are always present.
+#
+# The tooling is standard for AUTHORIZED penetration testing, CTFs, research, and
+# training. Unauthorized use against systems you don't own or aren't permitted to
+# test is illegal.
+set -uo pipefail
+export DEBIAN_FRONTEND=noninteractive
+echo "umbra: Red Team Edition hook"
+retry(){ local n=$1; shift; local i=1; while [ $i -le "$n" ]; do "$@" && return 0; sleep 6; i=$((i+1)); done; return 1; }
+gitclone(){ retry 4 git clone --depth 1 "$1" "$2"; }
+
+retry 5 apt-get install -y --no-install-recommends curl gnupg ca-certificates git >/dev/null 2>&1 || true
+
+# --- Metasploit Framework (Rapid7 official repo — self-contained, no base conflict) ---
+if retry 6 curl -fsSL https://apt.metasploit.com/metasploit-framework.gpg.key -o /tmp/msf.key; then
+    gpg --dearmor < /tmp/msf.key > /usr/share/keyrings/metasploit.gpg 2>/dev/null || true
+    echo "deb [signed-by=/usr/share/keyrings/metasploit.gpg] https://apt.metasploit.com/ lucid main" \
+        > /etc/apt/sources.list.d/metasploit.list
+    retry 4 apt-get update -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/metasploit.list \
+        -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 >/dev/null 2>&1 || true
+    retry 3 apt-get install -y --no-install-recommends metasploit-framework >/dev/null 2>&1 \
+        && echo "umbra: metasploit installed" || echo "umbra: metasploit skipped (network)"
+    rm -f /tmp/msf.key
+fi
+
+# --- git-based tools into /opt with launchers ---
+mkdir -p /opt
+if gitclone https://gitlab.com/exploit-database/exploitdb /opt/exploitdb; then
+    ln -sf /opt/exploitdb/searchsploit /usr/local/bin/searchsploit; echo "umbra: searchsploit installed"
+fi
+if gitclone https://github.com/sullo/nikto /opt/nikto; then
+    printf '#!/bin/sh\nexec perl /opt/nikto/program/nikto.pl "$@"\n' > /usr/local/bin/nikto
+    chmod +x /usr/local/bin/nikto; echo "umbra: nikto installed"
+fi
+if gitclone https://github.com/lgandx/Responder /opt/Responder; then
+    printf '#!/bin/sh\nexec python3 /opt/Responder/Responder.py "$@"\n' > /usr/local/bin/responder
+    chmod +x /usr/local/bin/responder; echo "umbra: responder installed"
+fi
+if gitclone https://github.com/CiscoCXSecurity/enum4linux /opt/enum4linux; then
+    printf '#!/bin/sh\nexec perl /opt/enum4linux/enum4linux.pl "$@"\n' > /usr/local/bin/enum4linux
+    chmod +x /usr/local/bin/enum4linux; echo "umbra: enum4linux installed"
+fi
+
+# --- wpscan (RubyGems) ---
+command -v gem >/dev/null 2>&1 && retry 2 gem install --no-document wpscan >/dev/null 2>&1 \
+    && echo "umbra: wpscan installed" || echo "umbra: wpscan skipped"
+
+# --- netexec (modern CrackMapExec) via pipx, system-wide ---
+if command -v pipx >/dev/null 2>&1; then
+    PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin retry 2 pipx install netexec >/dev/null 2>&1 \
+        && echo "umbra: netexec installed" || echo "umbra: netexec skipped"
+fi
+
+# --- wordlists (rockyou) ---
+mkdir -p /usr/share/wordlists
+if retry 4 curl -fsSL https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt \
+        -o /usr/share/wordlists/rockyou.txt; then
+    echo "umbra: rockyou wordlist installed (/usr/share/wordlists/rockyou.txt)"
+fi
+
+# --- relax hardened_malloc for the offensive toolset (stays available) ---
+if [ -f /etc/ld.so.preload ]; then
+    : > /etc/ld.so.preload
+    echo "umbra: hardened_malloc preload off for Red Team Edition (re-enable: umbra hardened-malloc)"
+fi
+
+# --- authorized-use banner ---
+cat > /etc/issue <<'EOF'
+
+   Umbra OS — RED TEAM EDITION
+
+   ┌────────────────────────────────────────────────────────────────┐
+   │  AUTHORIZED USE ONLY.  The offensive tools on this system are    │
+   │  for penetration testing, CTFs, research, and training WITH      │
+   │  EXPLICIT PERMISSION on systems you own or are authorized to     │
+   │  test. Unauthorized access to computer systems is illegal.       │
+   └────────────────────────────────────────────────────────────────┘
+
+   \n \l
+
+EOF
+cat > /etc/motd <<'EOF'
+
+  Umbra OS — Red Team Edition        (authorized testing only)
+
+  Toolkit: nmap masscan · gobuster ffuf sqlmap · metasploit nikto wpscan
+  hydra john hashcat · wireshark bettercap · aircrack-ng · impacket
+  responder netexec enum4linux searchsploit · proxychains socat · binwalk
+  Wordlists: /usr/share/wordlists/rockyou.txt
+
+  Security command center ....  umbra
+  Route all traffic via Tor ...  sudo umbra tor on
+  Randomize your MAC .........  sudo umbra mac
+
+EOF
+
+echo "umbra: Red Team Edition hook complete"
