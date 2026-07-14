@@ -1,0 +1,13 @@
+favorites=xfce4-terminal.desktop,firefox-esr.desktop,thunar.desktop,umbra-assistant.desktop,keepassxc.desktop
+recent=
+button-title=Umbra
+button-icon=/usr/share/backgrounds/umbra/logo.png
+show-button-title=false
+show-button-icon=true
+launcher-show-name=true
+launcher-show-description=true
+category-show-name=true
+view-as-icons=false
+confirm-session-command=true
+menu-width=500
+menu-height=560

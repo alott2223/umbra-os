@@ -1,60 +1,23 @@
 #!/bin/bash
-# Umbra OS — brand the Xfce desktop on first login (per user, idempotent).
-# Runs from /etc/xdg/autostart. Uses xfconf-query (not fragile static XML) so it
-# adapts to whatever monitors/workspaces exist. Sets the Umbra dark/purple look,
-# wallpaper, fonts, and swaps the classic menu for the searchable Whisker Menu.
+# Umbra OS — first-login wallpaper safety net for Xfce.
+# The full look (theme, panel, whisker menu, wallpaper) ships as static config in
+# /etc/skel/.config/xfce4. This ONLY re-asserts the wallpaper on whatever monitor
+# names actually exist on this host (VMs/GPUs name them differently), then reloads
+# the desktop. It never touches the panel — that's what broke it before.
 set -u
 marker="${HOME}/.config/umbra-xfce-done"
 [ -f "$marker" ] && exit 0
-
 WP="/usr/share/backgrounds/umbra/wallpaper.png"
-LOGO="/usr/share/backgrounds/umbra/logo.svg"
-[ -f "$LOGO" ] || LOGO="distributor-logo"
 
-# Give xfconfd / the panel a moment to come up.
-for _ in 1 2 3 4 5 6 7 8; do xfconf-query -c xsettings -l >/dev/null 2>&1 && break; sleep 1; done
+# wait for xfconfd to be answering
+for _ in 1 2 3 4 5 6 7 8; do xfconf-query -c xfce4-desktop -l >/dev/null 2>&1 && break; sleep 1; done
 
-# --- Theme, icons, cursor, fonts ---
-xfconf-query -c xsettings -p /Net/ThemeName        -n -t string -s "Yaru-purple-dark" 2>/dev/null || \
-xfconf-query -c xsettings -p /Net/ThemeName            -s "Yaru-purple-dark"
-xfconf-query -c xsettings -p /Net/IconThemeName    -n -t string -s "Papirus-Dark"      2>/dev/null || \
-xfconf-query -c xsettings -p /Net/IconThemeName        -s "Papirus-Dark"
-xfconf-query -c xsettings -p /Gtk/CursorThemeName  -n -t string -s "Bibata-Modern-Ice" 2>/dev/null || true
-xfconf-query -c xsettings -p /Gtk/FontName         -n -t string -s "Inter 10"          2>/dev/null || true
-xfconf-query -c xsettings -p /Gtk/MonospaceFontName -n -t string -s "JetBrains Mono 10" 2>/dev/null || true
-# prefer dark for apps that read the hint, and enable AT-SPI accessibility
-xfconf-query -c xsettings -p /Gtk/ApplicationPreferDarkTheme -n -t bool -s true 2>/dev/null || true
-xfconf-query -c xsettings -p /Net/EnableEventSounds -n -t bool -s false 2>/dev/null || true
-
-# --- Window manager: cohesive dark titlebars ---
-xfconf-query -c xfwm4 -p /general/theme -n -t string -s "Greybird-dark" 2>/dev/null || \
-xfconf-query -c xfwm4 -p /general/theme     -s "Greybird-dark"
-
-# --- Wallpaper on every monitor/workspace (names vary per host, so loop) ---
-found=0
+# set the wallpaper on every backdrop property that actually exists
 for prop in $(xfconf-query -c xfce4-desktop -l 2>/dev/null | grep -E '/last-image$'); do
-    xfconf-query -c xfce4-desktop -p "$prop" -s "$WP" 2>/dev/null && found=1
-    style="${prop%/last-image}/image-style"
-    xfconf-query -c xfce4-desktop -p "$style" -n -t int -s 5 2>/dev/null || \
-    xfconf-query -c xfce4-desktop -p "$style" -s 5 2>/dev/null || true
+    xfconf-query -c xfce4-desktop -p "$prop" -s "$WP" 2>/dev/null || true
+    st="${prop%/last-image}/image-style"
+    xfconf-query -c xfce4-desktop -p "$st" -s 5 2>/dev/null || true
 done
-if [ "$found" -eq 0 ]; then
-    xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitor0/workspace0/last-image  -n -t string -s "$WP" 2>/dev/null || true
-    xfconf-query -c xfce4-desktop -p /backdrop/screen0/monitor0/workspace0/image-style -n -t int    -s 5    2>/dev/null || true
-fi
-
-# --- Swap the classic Applications Menu for the searchable Whisker Menu ---
-# Find an applicationsmenu plugin on the panel and convert its slot to whiskermenu.
-for id in $(xfconf-query -c xfce4-panel -p /plugins -l 2>/dev/null \
-            | sed -n 's#^/plugins/plugin-\([0-9]\+\)$#\1#p' | sort -u); do
-    kind=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${id}" 2>/dev/null)
-    if [ "$kind" = "applicationsmenu" ]; then
-        xfconf-query -c xfce4-panel -p "/plugins/plugin-${id}" -s "whiskermenu" 2>/dev/null || true
-        break
-    fi
-done
-
-xfce4-panel --restart 2>/dev/null &
 xfdesktop --reload 2>/dev/null &
 
 mkdir -p "${HOME}/.config"
