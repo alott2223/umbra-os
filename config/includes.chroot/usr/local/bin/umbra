@@ -210,9 +210,16 @@ NFT
 
   dns)
     case "${1:-status}" in
-      status) resolvectl status 2>/dev/null | grep -Ei 'DNS Servers|DNSOverTLS|Current DNS|Protocols' | sed 's/^/  /'; head "resolv.conf"; cat /etc/resolv.conf | sed 's/^/  /' ;;
-      secure) need_root "dns secure"; for i in $(resolvectl status 2>/dev/null | grep -oP 'Link \d+ \(\K[^)]+'); do resolvectl dnsovertls "$i" yes 2>/dev/null || true; done; ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf; systemctl restart systemd-resolved; echo "strict DNS-over-TLS re-enabled" ;;
-      *) echo "usage: umbra dns {status|secure}" ;;
+      status) head "resolv.conf"; cat /etc/resolv.conf 2>/dev/null | sed 's/^/  /'; resolvectl status 2>/dev/null | grep -Ei 'DNSOverTLS|Current DNS|DNS Servers' | sed 's/^/  /' || true ;;
+      secure) need_root "dns secure"
+        printf '[main]\ndns=systemd-resolved\n' > /etc/NetworkManager/conf.d/99-umbra-dot.conf
+        systemctl unmask systemd-resolved 2>/dev/null || true; systemctl enable --now systemd-resolved
+        ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+        systemctl restart NetworkManager
+        echo "encrypted DNS-over-TLS (Quad9) enabled."
+        echo "revert to plain DNS:  sudo rm /etc/NetworkManager/conf.d/99-umbra-dot.conf && sudo systemctl restart NetworkManager" ;;
+      plain) need_root "dns plain"; rm -f /etc/NetworkManager/conf.d/99-umbra-dot.conf; systemctl restart NetworkManager; echo "plain DNS restored" ;;
+      *) echo "usage: umbra dns {status|secure|plain}" ;;
     esac
     ;;
 

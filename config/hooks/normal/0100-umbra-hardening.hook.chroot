@@ -29,13 +29,12 @@ systemctl enable jitterentropy-rngd.service 2>/dev/null || true
 systemctl unmask apparmor.service 2>/dev/null || true
 systemctl enable apparmor.service 2>/dev/null || true
 
-# systemd-resolved: unmask+enable and point resolv.conf at its stub so DoT is used
+# systemd-resolved is available for OPT-IN encrypted DNS (umbra dns secure), but is
+# NOT the default resolver — NetworkManager (dns=default) writes resolv.conf directly
+# so name resolution always works. Do NOT symlink resolv.conf to the resolved stub.
 systemctl unmask systemd-resolved.service 2>/dev/null || true
-systemctl enable systemd-resolved.service 2>/dev/null || true
-ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf 2>/dev/null || true
 
-# Belt-and-suspenders: a boot oneshot that force-starts AppArmor + resolved even in
-# the live environment (where enable-symlinks sometimes don't trigger a start).
+# Boot oneshot that force-enforces AppArmor (and a DNS sanity net).
 systemctl enable umbra-services.service 2>/dev/null || true
 # tor stays DISABLED until the user runs umbra-torswitch on
 systemctl disable tor.service 2>/dev/null || true
