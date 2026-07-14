@@ -49,6 +49,14 @@ ${C}KNOW-HOW${N}
    umbra tip           a daily operational-security tip
    umbra tip --all     browse every tip
 
+${C}AI & AUTOMATION${N}
+   umbra ai status     what an AI agent can control + VNC/SSH state
+   umbra ai screenshot see the screen (PNG)
+   umbra ai click/type/key   act on the desktop (xdotool)
+   umbra ai tree       structured UI (accessibility) tree
+   umbra ai ssh on     let agents drive over SSH (opt-in)
+   umbra ai vnc on     remote screen via VNC (opt-in, localhost)
+
 ${C}MAINTENANCE & EMERGENCY${N}
    umbra updates       apply security updates
    umbra panic         emergency: cut net, wipe keys, power off
@@ -64,6 +72,7 @@ case "$cmd" in
   verify)   exec umbra-verify.sh "$@" ;;
   panic)    exec umbra-panic "$@" ;;
   tor)      exec umbra-torswitch "$@" ;;
+  ai)       exec umbra-ai "$@" ;;
   hardened-malloc) exec umbra-hardened-malloc.sh "$@" ;;
 
   audit)

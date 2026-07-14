@@ -2,6 +2,8 @@
 Description=Umbra OS — ensure hardening services are active (AppArmor, resolved)
 After=network.target apparmor.service systemd-resolved.service
 Wants=apparmor.service systemd-resolved.service
+# Run before the login manager so the live-vs-installed autologin fixup applies.
+Before=display-manager.service
 
 [Service]
 Type=oneshot

@@ -4,6 +4,19 @@
 # directly, so this only steps in if resolv.conf is somehow empty/broken.
 set -uo pipefail
 
+# Autologin is a LIVE-session convenience. On an installed system the live 'user'
+# account doesn't exist, so switch to the greeter (standard, more secure login)
+# instead of looping on a failed autologin. Runs before the display manager.
+if ! id -u user >/dev/null 2>&1; then
+    cat > /etc/lightdm/lightdm.conf.d/10-umbra.conf <<'EOF'
+# Umbra OS — installed system: use the greeter (live autologin disabled).
+[Seat:*]
+user-session=xfce
+greeter-session=lightdm-gtk-greeter
+allow-guest=false
+EOF
+fi
+
 systemctl restart apparmor.service 2>/dev/null || true
 
 # DNS safety net: if, after NM has had a moment, nothing resolves AND resolv.conf

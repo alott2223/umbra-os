@@ -129,6 +129,47 @@ fonts-dejavu-core
 fonts-liberation2
 fonts-noto-core
 
+# =====================================================================
+# Default desktop: Xfce — a familiar, mouse-driven, point-and-click desktop
+# (like Kali) with a categorized applications menu. Chosen so Umbra is easy for
+# newcomers AND predictable for AI/automation control (stable stacking windows +
+# a real accessibility tree). i3 (below) stays installed as an alternate session.
+# =====================================================================
+xfce4
+xfce4-terminal
+xfce4-whiskermenu-plugin
+xfce4-goodies
+xfce4-power-manager
+xfce4-screenshooter
+xfce4-notifyd
+xfce4-pulseaudio-plugin
+xfce4-clipman-plugin
+xfce4-appfinder
+xfce4-taskmanager
+mousepad
+
+# =====================================================================
+# AI-control layer — lets AI/automation agents drive the desktop.
+# Local tools are always present; network control (VNC/SSH) is OPT-IN via
+# `umbra ai` so the hardened default keeps its small attack surface.
+# =====================================================================
+# input synthesis + window control (X11)
+xdotool
+wmctrl
+xautomation
+# screen capture for "see the screen"
+scrot
+imagemagick
+# accessibility tree (AT-SPI) so agents can read UI elements, not just pixels
+at-spi2-core
+python3-pyatspi
+python3-xlib
+python3-pil
+python3-tk
+# remote view+control surfaces (services stay disabled until `umbra ai` turns on)
+x11vnc
+openssh-server
+
 # --- i3 tiling window manager rice (the real Umbra desktop) ---
 i3
 i3lock
@@ -176,6 +217,8 @@ jq
 # --- Umbra "cyber-dark" aesthetic ---
 # GTK theme (used by thunar/lxappearance/etc.), icons, cursor
 yaru-theme-gtk
+# cohesive dark window-manager (xfwm4) + GTK theme with matching titlebars
+greybird-gtk-theme
 papirus-icon-theme
 bibata-cursor-theme
 lxappearance
@@ -186,6 +229,57 @@ fonts-firacode
 fonts-cantarell
 # Terminal eye-candy
 fastfetch
+
+# =====================================================================
+# Full daily-driver desktop — office, media, graphics, printing, comms.
+# Umbra boots i3 but ships a complete application suite so it works as an
+# everyday installable distro, not just a live security tool.
+# =====================================================================
+
+# --- Office / productivity ---
+libreoffice-writer
+libreoffice-calc
+libreoffice-impress
+libreoffice-gtk3
+libreoffice-style-colibre
+# --- Email ---
+thunderbird
+# --- Media players ---
+mpv
+vlc
+# --- Media codecs (play virtually any audio/video out of the box) ---
+ffmpeg
+libavcodec-extra
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-bad
+gstreamer1.0-plugins-ugly
+gstreamer1.0-libav
+gstreamer1.0-pipewire
+# --- Graphics / imaging ---
+gimp
+# --- Editors, viewers, calculator, disk tools ---
+mousepad
+evince
+galculator
+gnome-disk-utility
+baobab
+# --- Archive formats ---
+zip
+unzip
+p7zip-full
+unrar-free
+# --- Printing (CUPS; local only — network discovery stays off per opsec) ---
+cups
+cups-client
+system-config-printer
+printer-driver-gutenprint
+printer-driver-escpr
+# --- Bluetooth stack (blueman front-end already included above) ---
+bluez
+# --- Full Unicode: emoji + CJK ---
+fonts-noto-color-emoji
+fonts-noto-cjk
 
 # Basics
 sudo

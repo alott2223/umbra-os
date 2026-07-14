@@ -17,10 +17,13 @@ ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.s
 
 # Make executables runnable
 chmod +x /etc/polybar/launch.sh /usr/local/bin/umbra-help /usr/local/bin/umbra \
-    /usr/local/bin/umbra-lock /usr/local/bin/umbra-powermenu /usr/local/bin/umbra-settings 2>/dev/null || true
+    /usr/local/bin/umbra-lock /usr/local/bin/umbra-powermenu /usr/local/bin/umbra-settings \
+    /usr/local/bin/umbra-ai /usr/local/bin/umbra-xfce-setup 2>/dev/null || true
 
-# Ensure an i3 xsession exists (installed by the i3 package); sanity log.
-[ -f /usr/share/xsessions/i3.desktop ] && echo "umbra: i3 xsession present" \
-    || echo "umbra: WARNING i3.desktop missing"
+# Default desktop is Xfce; i3 stays available as an alternate session. Log both.
+[ -f /usr/share/xsessions/xfce.desktop ] && echo "umbra: xfce xsession present" \
+    || echo "umbra: WARNING xfce.desktop missing"
+[ -f /usr/share/xsessions/i3.desktop ] && echo "umbra: i3 xsession present (alt)" \
+    || echo "umbra: NOTE i3.desktop missing"
 
 echo "umbra: session hook complete"

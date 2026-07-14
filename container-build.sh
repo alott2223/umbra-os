@@ -16,8 +16,16 @@ cd /build
 find /build -type f \( -name "*.sh" -o -name "*.hook.chroot" -o -name "*.conf" \
     -o -name "*.cfg" -o -name "*.rules" -o -name "*.chroot" -o -name "*.script" \
     -o -name "*.nft" -o -name "*.plymouth" \) -exec sed -i 's/\r$//' {} +
+# The /usr/local/{bin,sbin} helper scripts are extension-less, so normalize them
+# explicitly (a stray \r in the shebang breaks them at runtime) and make runnable.
+for d in bin sbin; do
+    if [ -d "/build/config/includes.chroot/usr/local/$d" ]; then
+        sed -i 's/\r$//' /build/config/includes.chroot/usr/local/$d/* 2>/dev/null || true
+    fi
+done
 chmod +x /build/build.sh /build/config/hooks/normal/*.hook.chroot \
-    /build/config/includes.chroot/usr/local/sbin/*
+    /build/config/includes.chroot/usr/local/sbin/* \
+    /build/config/includes.chroot/usr/local/bin/*
 
 /build/build.sh
 

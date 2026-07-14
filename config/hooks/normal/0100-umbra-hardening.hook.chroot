@@ -40,8 +40,14 @@ systemctl enable umbra-services.service 2>/dev/null || true
 systemctl disable tor.service 2>/dev/null || true
 # usbguard enabled post-install (needs a device policy first)
 
-# disable listening/attack-surface services
-for svc in avahi-daemon.service avahi-daemon.socket cups.service cups.socket \
+# Full desktop usability: local printing + Bluetooth on by default. CUPS listens on
+# localhost only (nftables blocks inbound anyway); the NETWORK printer-discovery
+# daemons (cups-browsed, avahi) stay masked so we don't broadcast/listen on the LAN.
+systemctl enable cups.service cups.socket 2>/dev/null || true
+systemctl enable bluetooth.service 2>/dev/null || true
+
+# disable listening/attack-surface services (network discovery + legacy RPC/modem)
+for svc in avahi-daemon.service avahi-daemon.socket \
            cups-browsed.service rpcbind.service rpcbind.socket modemmanager.service; do
     systemctl disable "$svc" 2>/dev/null || true
     systemctl mask "$svc" 2>/dev/null || true

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Umbra Desktop Branding
+Comment=Apply the Umbra dark/purple theme, wallpaper and menu on first login
+Exec=/usr/local/bin/umbra-xfce-setup
+OnlyShowIn=XFCE;
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
