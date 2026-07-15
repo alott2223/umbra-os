@@ -45,6 +45,25 @@ WantedBy=default.target
 EOF
 systemctl disable umbra-assistant.service 2>/dev/null || true   # opt-in
 
+# --- Umbra Agent API service (opt-in; enable with: sudo systemctl enable --now umbra-agent) ---
+cat > /etc/systemd/system/umbra-agent.service <<'EOF'
+[Unit]
+Description=Umbra Agent — AI-native security control plane (MCP + REST, localhost, scope-gated)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/umbra-agent serve --port 7718
+Restart=on-failure
+NoNewPrivileges=yes
+IPAddressAllow=localhost
+IPAddressDeny=any
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl disable umbra-agent.service 2>/dev/null || true   # opt-in
+
 # --- Desktop launcher (shows in the Xfce/Whisker applications menu) ---
 cat > /usr/share/applications/umbra-assistant.desktop <<'EOF'
 [Desktop Entry]

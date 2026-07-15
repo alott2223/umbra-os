@@ -146,7 +146,8 @@ def _parse_nmap(xml):
     try: root = ET.fromstring(xml)
     except ET.ParseError as e: return {"error": f"xml parse: {e}"}
     for h in root.findall("host"):
-        addr_el = h.find("address[@addrtype='ipv4']") or h.find("address")
+        addr_el = h.find("address[@addrtype='ipv4']")
+        if addr_el is None: addr_el = h.find("address")
         ip = addr_el.get("addr") if addr_el is not None else "?"
         hn_el = h.find("hostnames/hostname")
         hostname = hn_el.get("name") if hn_el is not None else ""
