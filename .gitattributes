@@ -1,0 +1,11 @@
+# These scripts run inside Linux (live-build chroot). CRLF breaks the bash
+# interpreter (e.g. `set -euo pipefail\r`), so force LF regardless of the
+# checkout platform's autocrlf setting.
+*.sh            text eol=lf
+*.hook.chroot   text eol=lf
+container-build.sh text eol=lf
+build.sh        text eol=lf
+config/includes.chroot/usr/local/bin/**  text eol=lf
+config/includes.chroot/usr/local/sbin/** text eol=lf
+*.service       text eol=lf
+*.desktop       text eol=lf
