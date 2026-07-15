@@ -1,0 +1,8 @@
+#!/bin/sh
+# Umbra OS — launch Thunderbird outside hardened_malloc (same mozalloc issue as
+# Firefox). Shadows /usr/bin/thunderbird via PATH; execs the real binary through
+# umbra-unhardened while the rest of the system stays hardened.
+for b in /usr/lib/thunderbird/thunderbird /usr/bin/thunderbird; do
+    [ -x "$b" ] && exec umbra-unhardened "$b" "$@"
+done
+exec /usr/bin/thunderbird "$@"

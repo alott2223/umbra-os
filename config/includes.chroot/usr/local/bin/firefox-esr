@@ -1,0 +1,9 @@
+#!/bin/sh
+# Umbra OS — launch Firefox outside hardened_malloc (it aborts otherwise).
+# Shadows /usr/bin/firefox-esr via PATH; execs the real binary through
+# umbra-unhardened. Verified: renders pages normally; rest of the system stays
+# hardened. Re-enable full hardening for it with `umbra hardened-malloc` off.
+for b in /usr/lib/firefox-esr/firefox-esr /usr/bin/firefox-esr; do
+    [ -x "$b" ] && exec umbra-unhardened "$b" "$@"
+done
+exec /usr/bin/firefox-esr "$@"

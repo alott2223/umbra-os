@@ -19,7 +19,9 @@ ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.s
 chmod +x /etc/polybar/launch.sh /usr/local/bin/umbra-help /usr/local/bin/umbra \
     /usr/local/bin/umbra-lock /usr/local/bin/umbra-powermenu /usr/local/bin/umbra-settings \
     /usr/local/bin/umbra-ai /usr/local/bin/umbra-xfce-setup \
-    /usr/local/bin/umbra-assistant /usr/local/bin/umbra-agent 2>/dev/null || true
+    /usr/local/bin/umbra-assistant /usr/local/bin/umbra-agent \
+    /usr/local/bin/umbra-unhardened /usr/local/bin/firefox-esr \
+    /usr/local/bin/thunderbird 2>/dev/null || true
 
 # Default desktop is Xfce; i3 stays available as an alternate session. Log both.
 [ -f /usr/share/xsessions/xfce.desktop ] && echo "umbra: xfce xsession present" \

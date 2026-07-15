@@ -1,0 +1,11 @@
+#!/bin/sh
+# Umbra OS — run a program WITHOUT the system hardened_malloc preload.
+# A few complex apps (Firefox/Thunderbird's mozalloc) abort under hardened_malloc's
+# strict "invalid free" checks. bubblewrap masks /etc/ld.so.preload for just this
+# process tree, so the app runs normally while the REST of the system keeps
+# hardened_malloc. No-op fallback if bwrap is missing or the preload is empty.
+#   usage: umbra-unhardened <program> [args...]
+if command -v bwrap >/dev/null 2>&1 && [ -s /etc/ld.so.preload ]; then
+    exec bwrap --dev-bind / / --ro-bind /dev/null /etc/ld.so.preload "$@"
+fi
+exec "$@"
