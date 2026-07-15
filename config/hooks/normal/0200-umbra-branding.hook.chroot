@@ -15,6 +15,21 @@ if command -v rsvg-convert >/dev/null; then
         -o /usr/share/backgrounds/umbra/logo.png || true
 fi
 
+# --- Make the Umbra wallpaper the Xfce fallback too -------------------------
+# xfdesktop shows a compiled-in default (one of /usr/share/backgrounds/xfce/*)
+# for any monitor that has no explicit backdrop set — which happens for the real
+# monitor before our config catches it. Overwrite those defaults with the Umbra
+# art so the wallpaper is correct no matter the monitor's connector name.
+if [ -d /usr/share/backgrounds/xfce ] && [ -f /usr/share/backgrounds/umbra/wallpaper.svg ]; then
+    for f in /usr/share/backgrounds/xfce/*.svg; do
+        [ -e "$f" ] && cp -f /usr/share/backgrounds/umbra/wallpaper.svg "$f" || true
+    done
+    # the raster default (xfce-blue.jpg) — replace with the rendered PNG (gdk-pixbuf
+    # detects format by content, so the extension mismatch is fine)
+    [ -f /usr/share/backgrounds/umbra/wallpaper.png ] && \
+        cp -f /usr/share/backgrounds/umbra/wallpaper.png /usr/share/backgrounds/xfce/xfce-blue.jpg || true
+fi
+
 # --- Plymouth boot splash ---------------------------------------------------
 if command -v plymouth-set-default-theme >/dev/null; then
     plymouth-set-default-theme umbra || true
