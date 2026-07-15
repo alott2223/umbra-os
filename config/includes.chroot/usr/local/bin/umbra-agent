@@ -224,6 +224,90 @@ def nuclei_scan(url):
         node("vuln", f"{name} @ {j.get('matched-at','')}", severity=sev, url=url)
     return {"url": url, "vulns": vulns}
 
+# ------------------------------------------------------------------ code audit ---
+# Static analysis for the "programming / testing programs" half. Uses semgrep /
+# bandit / gitleaks if installed; always runs a stdlib heuristic pass so it works
+# with zero dependencies. Findings land in the graph as code-finding nodes.
+CODE_RULES = [
+    ("hardcoded-secret", r"""(?i)(password|passwd|pwd|secret|api[_-]?key|token)\s*[:=]\s*['"][^'"]{6,}['"]""", "high"),
+    ("aws-key",          r"AKIA[0-9A-Z]{16}", "critical"),
+    ("private-key",      r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----", "critical"),
+    ("eval-exec",        r"(?<![\w.])(eval|exec)\s*\(", "medium"),
+    ("os-system",        r"(?<![\w.])(os\.system|os\.popen|commands\.getoutput)\s*\(", "high"),
+    ("shell-true",       r"subprocess\.[a-zA-Z_]+\([^)]*shell\s*=\s*True", "high"),
+    ("pickle-loads",     r"(?<![\w.])pickle\.loads?\s*\(", "medium"),
+    ("weak-hash",        r"(?<![\w.])(md5|sha1)\s*\(", "low"),
+    ("tls-verify-off",   r"verify\s*=\s*False|InsecureRequestWarning|CURLOPT_SSL_VERIFY(?:PEER|HOST)\s*,\s*0", "high"),
+    ("sql-fstring",      r"""(?i)(select|insert|update|delete)\s+.*(%s|\{\}|\+\s*\w+|f['"]).*""", "medium"),
+    ("dangerous-yaml",   r"yaml\.load\s*\((?![^)]*Loader)", "medium"),
+]
+def _compiled():
+    import re as _re
+    return [(n, _re.compile(p), s) for n, p, s in CODE_RULES]
+
+def code_audit(path, max_files=6000):
+    path = os.path.abspath(path)
+    audit("code-audit", path, True)
+    out = {"path": path, "tools": [], "findings": []}
+    # --- external SAST if available (structured JSON) ---
+    if have("semgrep"):
+        rc, so, se = run(["semgrep", "--config", "auto", "--json", "--quiet", path], timeout=1800)
+        try:
+            for r in json.loads(so).get("results", []):
+                sev = r.get("extra", {}).get("severity", "INFO").lower()
+                sev = {"error":"high","warning":"medium","info":"low"}.get(sev, sev)
+                _codenode(r.get("check_id","semgrep"), r.get("path",""),
+                          r.get("start",{}).get("line",0), sev, "semgrep")
+                out["findings"].append({"rule": r.get("check_id"), "file": r.get("path"),
+                                        "line": r.get("start",{}).get("line"), "severity": sev})
+            out["tools"].append("semgrep")
+        except (ValueError, KeyError): pass
+    if have("gitleaks"):
+        rc, so, se = run(["gitleaks", "detect", "-s", path, "--report-format", "json",
+                          "--report-path", "/dev/stdout", "--no-banner"], timeout=600)
+        try:
+            for r in json.loads(so or "[]"):
+                _codenode("secret:"+r.get("RuleID","?"), r.get("File",""), r.get("StartLine",0),
+                          "critical", "gitleaks")
+                out["findings"].append({"rule": "secret:"+r.get("RuleID",""), "file": r.get("File"),
+                                        "line": r.get("StartLine"), "severity": "critical"})
+            out["tools"].append("gitleaks")
+        except (ValueError, KeyError): pass
+    # --- stdlib heuristic pass (always runs) ---
+    rules = _compiled(); skip = {".git","node_modules","__pycache__",".venv","venv","dist","build"}
+    exts = {".py",".js",".ts",".php",".rb",".go",".java",".sh",".yml",".yaml",".env",".c",".cpp",".cs",".html",".json",".conf",".ini",".tf"}
+    n = 0
+    for dp, dn, fn in os.walk(path):
+        dn[:] = [d for d in dn if d not in skip and not d.startswith(".")]
+        for f in fn:
+            if n >= max_files: break
+            fp = os.path.join(dp, f)
+            if os.path.splitext(f)[1].lower() not in exts: continue
+            try:
+                with open(fp, "r", errors="ignore") as fh: lines = fh.readlines()
+            except OSError: continue
+            n += 1
+            for i, line in enumerate(lines, 1):
+                if len(line) > 2000: continue
+                for name, rx, sev in rules:
+                    if rx.search(line):
+                        rel = os.path.relpath(fp, path)
+                        _codenode(name, rel, i, sev, "heuristic")
+                        out["findings"].append({"rule": name, "file": rel, "line": i,
+                                                "severity": sev, "match": line.strip()[:120]})
+    out["files_scanned"] = n
+    out["summary"] = _sev_counts(out["findings"])
+    return out
+
+def _codenode(rule, file, line, sev, source):
+    node("code-finding", f"{rule} @ {file}:{line}", rule=rule, file=file, line=line,
+         severity=sev, source=source)
+
+def _sev_counts(items):
+    c = {}
+    for it in items: c[it["severity"]] = c.get(it["severity"], 0) + 1
+    return c
+
 # --------------------------------------------------------------------- report ---
 def report():
     hosts = findings("host"); ports = findings("port")
@@ -254,6 +338,14 @@ def report():
     if paths:
         lines += [f"## Discovered paths ({len(paths)})"]
         for p in paths: lines.append(f"- `{p['name']}` ({p['data'].get('status')})")
+    code = findings("code-finding")
+    if code:
+        lines += ["", f"## Code audit ({len(code)})"]
+        order = {"critical":0,"high":1,"medium":2,"low":3,"info":4}
+        for cf in sorted(code, key=lambda x: order.get(x["data"].get("severity","info"),9)):
+            d = cf["data"]
+            lines.append(f"- **[{d.get('severity','?').upper()}]** {d.get('rule','')} — "
+                         f"`{d.get('file','')}:{d.get('line','')}`")
     return "\n".join(lines)
 
 # --------------------------------------------------------------------- server ---
@@ -268,6 +360,8 @@ def serve(host="127.0.0.1", port=7718):
        "inputSchema":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}},
       {"name":"dir_scan","description":"Content discovery on an in-scope URL (gobuster)",
        "inputSchema":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}},
+      {"name":"code_audit","description":"Static-analyze a local codebase (SAST + heuristics) into findings",
+       "inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},
       {"name":"findings","description":"Query the findings graph (optional type/query)",
        "inputSchema":{"type":"object","properties":{"type":{"type":"string"},"query":{"type":"string"}}}},
       {"name":"report","description":"Generate a markdown engagement report from findings",
@@ -279,6 +373,7 @@ def serve(host="127.0.0.1", port=7718):
             if name == "nmap":      return nmap_scan(a["target"], a.get("ports"))
             if name == "web_probe": return web_probe(a["url"])
             if name == "dir_scan":  return dir_scan(a["url"], a.get("wordlist"))
+            if name == "code_audit": return code_audit(a["path"])
             if name == "findings":  return findings(a.get("type"), a.get("query"))
             if name == "report":    return report()
             return {"error": f"unknown tool {name}"}
@@ -326,6 +421,7 @@ def main():
     wp = sub.add_parser("web"); wp.add_argument("url")
     ds = sub.add_parser("dirscan"); ds.add_argument("url"); ds.add_argument("-w","--wordlist")
     nu = sub.add_parser("nuclei"); nu.add_argument("url")
+    ca = sub.add_parser("code"); ca.add_argument("path", nargs="?", default=".")
     fn = sub.add_parser("findings"); fn.add_argument("type", nargs="?"); fn.add_argument("-q","--query")
     sub.add_parser("report"); sub.add_parser("audit"); sub.add_parser("status")
     sv = sub.add_parser("serve"); sv.add_argument("--port", type=int, default=7718)
@@ -345,6 +441,7 @@ def main():
         elif cmd == "web":     print(json.dumps(web_probe(args.url), indent=2))
         elif cmd == "dirscan": print(json.dumps(dir_scan(args.url, args.wordlist), indent=2))
         elif cmd == "nuclei":  print(json.dumps(nuclei_scan(args.url), indent=2))
+        elif cmd == "code":    print(json.dumps(code_audit(args.path), indent=2))
         elif cmd == "findings":
             for f in findings(args.type, args.query):
                 print(f"[{f['type']}] {f['name']}  {json.dumps(f['data'])}")

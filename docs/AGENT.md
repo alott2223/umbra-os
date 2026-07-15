@@ -33,10 +33,21 @@ umbra agent nmap 10.10.5.9                 # structured scan -> JSON + graph
 umbra agent web http://10.10.5.9/         # fingerprint (headers, whatweb)
 umbra agent dirscan http://10.10.5.9/     # content discovery (gobuster)
 umbra agent nuclei http://10.10.5.9/      # templated vuln scan
+umbra agent code ./myproject              # static-analyze a codebase (SAST)
 umbra agent findings host                 # query the graph
 umbra agent report                        # markdown engagement report
 umbra agent audit                         # what has been done, to what
 ```
+
+### Code auditing (the "programming / testing programs" half)
+
+`umbra agent code <path>` statically analyses a codebase and files results into
+the same graph. It uses **semgrep / gitleaks** if installed for depth, and always
+runs a **stdlib heuristic pass** (zero dependencies) that flags hardcoded secrets,
+AWS keys, private keys, `eval`/`exec`, `os.system`, `subprocess(shell=True)`,
+`pickle.loads`, weak hashes, `verify=False`, unsafe `yaml.load`, and string-built
+SQL — across Python/JS/TS/PHP/Ruby/Go/Java/shell/config files. Findings appear in
+`umbra agent report` alongside the network results, severity-ranked.
 
 An out-of-scope target is refused before the tool ever runs:
 
