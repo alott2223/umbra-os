@@ -171,6 +171,8 @@ python3
 python3-venv
 # bubblewrap: run Firefox/Thunderbird outside hardened_malloc (umbra-unhardened)
 bubblewrap
+# cron: schedule the passive bug-bounty monitor (umbra agent schedule daily)
+cron
 # remote view+control surfaces (services stay disabled until `umbra ai` turns on)
 x11vnc
 openssh-server

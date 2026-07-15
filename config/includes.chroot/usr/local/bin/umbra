@@ -55,6 +55,9 @@ ${C}AI SECURITY AGENT${N}  ${D}(scope-gated, structured, audited)${N}
    umbra agent web <url>        fingerprint a web service
    umbra agent dirscan <url>    content discovery (gobuster)
    umbra agent findings         query the findings graph
+   umbra agent hunt <domain>    automated recon (enum + scope-filter + probe)
+   umbra agent monitor          diff-recon: NEW assets + takeover candidates
+   umbra agent schedule daily   run the passive monitor every day (cron)
    umbra agent report           generate an engagement report
    umbra agent serve            MCP + REST endpoint for AI agents
 

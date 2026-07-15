@@ -72,6 +72,28 @@ The agent connects to **one endpoint**, authorizes its scope, scans, and the
 results land as structured findings it can query and report on — every action
 checked and logged.
 
+## Continuous monitoring (the automatable-payout engine)
+
+The bugs automation actually pays for are found by **being first on new attack
+surface** — not by out-scanning a mature target. `umbra agent monitor` does that:
+
+```bash
+umbra agent monitor           # re-enum in-scope domains, DIFF vs last run
+umbra agent schedule daily    # run it every day via cron (per-user, opt-in)
+```
+
+Each run (passive — CT logs + DNS-over-HTTPS, no packets to the target):
+- re-enumerates every in-scope domain and **diffs against known hosts** → reports
+  only **NEW assets** (freshest surface = least picked-over = your best shot);
+- **CNAME-checks the new hosts for subdomain-takeover** candidates (dangling
+  CNAME to GitHub Pages / Heroku / S3 / Azure / etc. — one of the few fully
+  automatable, clearly-payable classes);
+- writes a dated diff report to `~/.local/share/umbra/monitor-*.md`.
+
+The active/exploit steps stay **human-gated** — the monitor surfaces candidates;
+you verify and submit. `umbra agent schedule daily` installs it for the current
+user; add more programs (breadth is the edge) with `umbra bounty program add`.
+
 ## Design notes
 
 - **Stdlib-only core** (Python): scope registry, findings graph, nmap XML parser,

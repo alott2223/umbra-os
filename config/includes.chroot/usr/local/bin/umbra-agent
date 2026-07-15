@@ -26,13 +26,15 @@ def db():
     c = sqlite3.connect(DB)
     c.executescript("""
     CREATE TABLE IF NOT EXISTS scope(
-      id INTEGER PRIMARY KEY, kind TEXT, value TEXT UNIQUE, added REAL);
+      id INTEGER PRIMARY KEY, kind TEXT, value TEXT UNIQUE, added REAL, role TEXT DEFAULT 'in');
     CREATE TABLE IF NOT EXISTS node(
       id INTEGER PRIMARY KEY, type TEXT, name TEXT, data TEXT DEFAULT '{}',
       created REAL, UNIQUE(type,name));
     CREATE TABLE IF NOT EXISTS edge(
       src INTEGER, dst INTEGER, rel TEXT, UNIQUE(src,dst,rel));
     """)
+    try: c.execute("ALTER TABLE scope ADD COLUMN role TEXT DEFAULT 'in'")
+    except sqlite3.OperationalError: pass   # column already exists on older DBs
     return c
 
 def audit(action, target, allowed, detail=""):
@@ -43,40 +45,46 @@ def audit(action, target, allowed, detail=""):
         f.write(line + "\n")
 
 # --------------------------------------------------------------------- scope ---
-def scope_add(value):
+def scope_add(value, role="in"):
     value = value.strip()
     try:
         ipaddress.ip_network(value, strict=False); kind = "cidr"
     except ValueError:
         kind = "domain"
     c = db()
-    c.execute("INSERT OR IGNORE INTO scope(kind,value,added) VALUES(?,?,?)",
-              (kind, value, time.time())); c.commit(); c.close()
-    audit("scope-add", value, True)
+    c.execute("INSERT OR REPLACE INTO scope(kind,value,added,role) VALUES(?,?,?,?)",
+              (kind, value, time.time(), role)); c.commit(); c.close()
+    audit("scope-add", value, True, role)
     return kind
 
 def scope_list():
-    c = db(); rows = c.execute("SELECT kind,value FROM scope ORDER BY added").fetchall(); c.close()
+    c = db(); rows = c.execute("SELECT kind,value,role FROM scope ORDER BY role DESC,added").fetchall(); c.close()
     return rows
 
+def _match(kind, value, target, tip):
+    if kind == "cidr" and tip is not None:
+        return tip in ipaddress.ip_network(value, strict=False)
+    if kind == "domain" and tip is None:
+        t = target.lower().rstrip("."); v = value.lower().lstrip("*.").rstrip(".")
+        return t == v or t.endswith("." + v)
+    return False
+
 def in_scope(target):
-    """True if target (IP or hostname) is inside an authorized scope entry."""
-    c = db(); rows = c.execute("SELECT kind,value FROM scope").fetchall(); c.close()
-    if not rows:
+    """True only if target matches an INCLUDE and no EXCLUDE. Excludes win."""
+    c = db(); rows = c.execute("SELECT kind,value,role FROM scope").fetchall(); c.close()
+    includes = [(k, v) for k, v, r in rows if r != "out"]
+    excludes = [(k, v) for k, v, r in rows if r == "out"]
+    if not includes:
         return False, "no scope defined (add one: umbra agent scope add <ip/cidr/domain>)"
-    # IP target vs cidr scopes
     tip = None
     try: tip = ipaddress.ip_address(target)
     except ValueError: pass
-    for kind, value in rows:
-        if kind == "cidr" and tip is not None:
-            if tip in ipaddress.ip_network(value, strict=False):
-                return True, value
-        if kind == "domain" and tip is None:
-            t = target.lower().rstrip(".")
-            v = value.lower().lstrip("*.").rstrip(".")
-            if t == v or t.endswith("." + v):
-                return True, value
+    for k, v in excludes:
+        if _match(k, v, target, tip):
+            return False, f"EXCLUDED by scope rule '{v}'"
+    for k, v in includes:
+        if _match(k, v, target, tip):
+            return True, v
     return False, "target is NOT in the authorized scope"
 
 def require_scope(target, action):
@@ -317,17 +325,22 @@ def enum_subdomains(domain):
     if have("subfinder"):
         rc, out, _ = run(["subfinder", "-silent", "-d", domain], timeout=600)
         subs |= {l.strip().lower() for l in out.splitlines() if l.strip()}
-    try:
-        import urllib.request
-        req = urllib.request.Request(f"https://crt.sh/?q=%25.{domain}&output=json",
-                                     headers={"User-Agent": "umbra-agent"})
-        for row in json.loads(urllib.request.urlopen(req, timeout=40).read() or b"[]"):
-            for name in (row.get("name_value", "") or "").split("\n"):
-                name = name.strip().lower().lstrip("*.")
-                if name.endswith("." + domain) or name == domain:
-                    subs.add(name)
-    except Exception:
-        pass
+    import urllib.request
+    for attempt in range(4):   # crt.sh is flaky; retry so an empty reply != "no new assets"
+        try:
+            req = urllib.request.Request(f"https://crt.sh/?q=%25.{domain}&output=json",
+                                         headers={"User-Agent": "umbra-agent"})
+            data = json.loads(urllib.request.urlopen(req, timeout=45).read() or b"[]")
+            if not data and attempt < 3:
+                time.sleep(4); continue
+            for row in data:
+                for name in (row.get("name_value", "") or "").split("\n"):
+                    name = name.strip().lower().lstrip("*.")
+                    if name.endswith("." + domain) or name == domain:
+                        subs.add(name)
+            break
+        except Exception:
+            time.sleep(4)
     return sorted(subs)
 
 def _probe(host):
@@ -372,6 +385,105 @@ def hunt(domain, do_nuclei=False, max_hosts=400):
     result["note"] = ("nuclei run on live hosts" if do_nuclei and have("nuclei")
                       else "run nuclei separately: umbra agent nuclei <url>")
     return result
+
+# ------------------------------------------------------ continuous monitoring ---
+# Subdomain-takeover fingerprints: a dangling CNAME to one of these + a "not
+# claimed" response = a takeover candidate (one of the few fully-automatable,
+# clearly-payable bug classes).
+TAKEOVER_FP = {
+    "github.io": "GitHub Pages", "herokuapp.com": "Heroku", "herokudns.com": "Heroku",
+    "s3.amazonaws.com": "AWS S3", "s3-website": "AWS S3", "cloudfront.net": "CloudFront",
+    "azurewebsites.net": "Azure", "cloudapp.net": "Azure", "trafficmanager.net": "Azure",
+    "blob.core.windows.net": "Azure Blob", "wpengine.com": "WPEngine",
+    "pantheonsite.io": "Pantheon", "ghost.io": "Ghost", "netlify.app": "Netlify",
+    "netlify.com": "Netlify", "readthedocs.io": "ReadTheDocs", "surge.sh": "Surge",
+    "bitbucket.io": "Bitbucket", "zendesk.com": "Zendesk", "helpscoutdocs.com": "HelpScout",
+    "statuspage.io": "Statuspage", "fastly.net": "Fastly", "unbouncepages.com": "Unbounce",
+    "wordpress.com": "WordPress", "tumblr.com": "Tumblr", "shopify.com": "Shopify",
+}
+
+def _cname(host):
+    """Passive CNAME lookup via DNS-over-HTTPS (no direct packets to the target)."""
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f"https://cloudflare-dns.com/dns-query?name={host}&type=CNAME",
+            headers={"accept": "application/dns-json", "User-Agent": "umbra-agent"})
+        data = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        for a in data.get("Answer", []):
+            if a.get("type") == 5:  # CNAME
+                return a.get("data", "").rstrip(".")
+    except Exception:
+        pass
+    return ""
+
+def schedule(action="status"):
+    """Install/remove a daily user-cron running the passive monitor. Per-user so it
+    uses the right home/engagement DB; opt-in; safe (passive)."""
+    CRON = ("17 6 * * * /usr/local/bin/umbra-agent monitor "
+            ">> $HOME/.local/share/umbra/monitor.log 2>&1")
+    try:
+        existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+    except FileNotFoundError:
+        return "cron not installed"
+    lines = [l for l in existing.splitlines() if "umbra-agent monitor" not in l]
+    if action == "status":
+        return "daily (06:17)" if any("umbra-agent monitor" in l for l in existing.splitlines()) else "not scheduled"
+    if action == "daily":
+        lines.append(CRON)
+    # 'off' just leaves it removed
+    subprocess.run(["crontab", "-"], input="\n".join(lines) + "\n", text=True)
+    return "scheduled daily @ 06:17" if action == "daily" else "unscheduled"
+
+def monitor(program=None):
+    """Diff-recon: re-enumerate in-scope domains, report NEW assets since last run,
+    and flag subdomain-takeover candidates. Passive (CT logs + DoH). Safe to run
+    unattended — this is the 'be first on new attack surface' engine."""
+    domains = sorted({v for k, v, r in scope_list() if r != "out" and k == "domain"})
+    if not domains:
+        return {"error": "no in-scope domains (set up a program first)"}
+    known = {f["name"] for f in findings("host")}
+    new_hosts, takeover = [], []
+    for d in domains:
+        for s in enum_subdomains(d):
+            ok, _ = in_scope(s)
+            if ok and s not in known:
+                node("host", s, source="monitor", first_seen=time.strftime("%Y-%m-%d"))
+                new_hosts.append(s)
+                known.add(s)
+    for h in new_hosts:                       # takeover check on the NEW ones only
+        cn = _cname(h)
+        if not cn:
+            continue
+        for fp, svc in TAKEOVER_FP.items():
+            if fp in cn:
+                takeover.append({"host": h, "cname": cn, "service": svc})
+                node("takeover-candidate", h, cname=cn, service=svc, severity="high")
+                break
+    audit("monitor", program or "all-scope", True, f"{len(new_hosts)} new, {len(takeover)} takeover-candidates")
+    ts = time.strftime("%Y-%m-%d %H:%M")
+    lines = [f"# Umbra monitor — {ts}", "",
+             f"Domains watched: {len(domains)}   New assets: {len(new_hosts)}   "
+             f"Takeover candidates: {len(takeover)}", ""]
+    if takeover:
+        lines.append("## ⚠ TAKEOVER CANDIDATES (verify + report)")
+        for t in takeover:
+            lines.append(f"- **{t['host']}** → `{t['cname']}` ({t['service']}) — dangling? verify manually")
+        lines.append("")
+    if new_hosts:
+        lines.append("## New assets (test these first — freshest surface)")
+        for h in new_hosts:
+            lines.append(f"- {h}")
+    else:
+        lines.append("_No new assets since last run._")
+    rep = "\n".join(lines)
+    try:
+        path = os.path.join(DATA, f"monitor-{time.strftime('%Y%m%d-%H%M')}.md")
+        with open(path, "w") as f: f.write(rep + "\n")
+    except OSError:
+        path = ""
+    return {"domains": len(domains), "new_hosts": new_hosts,
+            "takeover_candidates": takeover, "report": path, "text": rep}
 
 # --------------------------------------------------------------------- report ---
 def report():
@@ -429,6 +541,8 @@ def serve(host="127.0.0.1", port=7718):
        "inputSchema":{"type":"object","properties":{"domain":{"type":"string"}},"required":["domain"]}},
       {"name":"hunt","description":"Automated recon: enum -> scope-filter -> live-probe (in-scope hosts only)",
        "inputSchema":{"type":"object","properties":{"domain":{"type":"string"},"nuclei":{"type":"boolean"}},"required":["domain"]}},
+      {"name":"monitor","description":"Diff-recon across all in-scope domains: report NEW assets + takeover candidates",
+       "inputSchema":{"type":"object","properties":{}}},
       {"name":"code_audit","description":"Static-analyze a local codebase (SAST + heuristics) into findings",
        "inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},
       {"name":"findings","description":"Query the findings graph (optional type/query)",
@@ -444,6 +558,7 @@ def serve(host="127.0.0.1", port=7718):
             if name == "dir_scan":  return dir_scan(a["url"], a.get("wordlist"))
             if name == "enum":      return {"domain": a["domain"], "subdomains": enum_subdomains(a["domain"])}
             if name == "hunt":      return hunt(a["domain"], a.get("nuclei", False))
+            if name == "monitor":   return monitor()
             if name == "code_audit": return code_audit(a["path"])
             if name == "findings":  return findings(a.get("type"), a.get("query"))
             if name == "report":    return report()
@@ -488,12 +603,15 @@ def main():
     p = argparse.ArgumentParser(prog="umbra-agent", description="AI-native security engagement control plane")
     sub = p.add_subparsers(dest="cmd")
     sc = sub.add_parser("scope"); sc.add_argument("action", choices=["add","list","clear"]); sc.add_argument("value", nargs="?")
+    sc.add_argument("--out", action="store_true", help="mark as an EXCLUDE (out of scope)")
     sn = sub.add_parser("nmap"); sn.add_argument("target"); sn.add_argument("-p","--ports"); sn.add_argument("-x","--extra")
     wp = sub.add_parser("web"); wp.add_argument("url")
     ds = sub.add_parser("dirscan"); ds.add_argument("url"); ds.add_argument("-w","--wordlist")
     nu = sub.add_parser("nuclei"); nu.add_argument("url")
     en = sub.add_parser("enum"); en.add_argument("domain")
     hu = sub.add_parser("hunt"); hu.add_argument("domain"); hu.add_argument("--nuclei", action="store_true")
+    sub.add_parser("monitor")
+    sh = sub.add_parser("schedule"); sh.add_argument("action", nargs="?", choices=["daily","off","status"], default="status")
     ca = sub.add_parser("code"); ca.add_argument("path", nargs="?", default=".")
     fn = sub.add_parser("findings"); fn.add_argument("type", nargs="?"); fn.add_argument("-q","--query")
     sub.add_parser("report"); sub.add_parser("audit"); sub.add_parser("status")
@@ -503,12 +621,14 @@ def main():
     try:
         if cmd == "scope":
             if args.action == "add":
-                print(f"authorized {args.value} ({scope_add(args.value)})")
+                role = "out" if args.out else "in"
+                print(f"scope-{role}: {args.value} ({scope_add(args.value, role)})")
             elif args.action == "clear":
                 c = db(); c.execute("DELETE FROM scope"); c.commit(); c.close(); print("scope cleared")
             else:
-                for k, v in scope_list(): print(f"{v}  ({k})")
-                if not scope_list(): print("(no scope — add one before scanning)")
+                rows = scope_list()
+                for k, v, r in rows: print(f"[{'OUT' if r=='out' else 'in '}] {v}  ({k})")
+                if not rows: print("(no scope — add one before scanning)")
         elif cmd == "nmap":
             print(json.dumps(nmap_scan(args.target, args.ports, args.extra), indent=2))
         elif cmd == "web":     print(json.dumps(web_probe(args.url), indent=2))
@@ -516,6 +636,10 @@ def main():
         elif cmd == "nuclei":  print(json.dumps(nuclei_scan(args.url), indent=2))
         elif cmd == "enum":    print("\n".join(enum_subdomains(args.domain)) or "(none found)")
         elif cmd == "hunt":    print(json.dumps(hunt(args.domain, args.nuclei), indent=2))
+        elif cmd == "monitor":
+            r = monitor(); print(r.get("text", json.dumps(r, indent=2)))
+            if r.get("report"): print(f"\n[report: {r['report']}]")
+        elif cmd == "schedule": print(schedule(args.action))
         elif cmd == "code":    print(json.dumps(code_audit(args.path), indent=2))
         elif cmd == "findings":
             for f in findings(args.type, args.query):

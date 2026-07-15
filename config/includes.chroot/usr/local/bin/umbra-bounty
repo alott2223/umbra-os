@@ -79,7 +79,7 @@ def db():
     c = sqlite3.connect(DB)
     c.executescript("""
     CREATE TABLE IF NOT EXISTS scope(
-      id INTEGER PRIMARY KEY, kind TEXT, value TEXT UNIQUE, added REAL);
+      id INTEGER PRIMARY KEY, kind TEXT, value TEXT UNIQUE, added REAL, role TEXT DEFAULT 'in');
     CREATE TABLE IF NOT EXISTS program(
       name TEXT PRIMARY KEY, url TEXT, scope_in TEXT DEFAULT '[]',
       scope_out TEXT DEFAULT '[]', rewards TEXT DEFAULT '{}', rules TEXT DEFAULT '',
@@ -93,6 +93,8 @@ def db():
       poc TEXT DEFAULT '', impact TEXT DEFAULT '', remediation TEXT DEFAULT '',
       status TEXT DEFAULT 'draft', created REAL);
     """)
+    try: c.execute("ALTER TABLE scope ADD COLUMN role TEXT DEFAULT 'in'")
+    except sqlite3.OperationalError: pass
     return c
 
 def _scope_kind(v):
@@ -118,9 +120,9 @@ def program_scope(name, value, direction="in"):
     (si if direction == "in" else so).append(value)
     c.execute("UPDATE program SET scope_in=?,scope_out=? WHERE name=?",
               (json.dumps(sorted(set(si))), json.dumps(sorted(set(so))), name))
-    if direction == "in":   # seed umbra-agent's gate
-        c.execute("INSERT OR IGNORE INTO scope(kind,value,added) VALUES(?,?,?)",
-                  (_scope_kind(value), value, time.time()))
+    # seed umbra-agent's gate: in-scope authorizes, out-of-scope EXCLUDES (wins)
+    c.execute("INSERT OR REPLACE INTO scope(kind,value,added,role) VALUES(?,?,?,?)",
+              (_scope_kind(value), value, time.time(), "in" if direction == "in" else "out"))
     c.commit(); c.close()
 
 def program_reward(name, severity, amount):
