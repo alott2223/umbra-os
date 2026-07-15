@@ -67,6 +67,12 @@ if command -v pipx >/dev/null 2>&1; then
     fi
 fi
 
+# --- nuclei (templated vuln scanner) — powers `umbra agent nuclei` ---
+if command -v go >/dev/null 2>&1 && ! command -v nuclei >/dev/null 2>&1; then
+    GOBIN=/usr/local/bin retry 2 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest \
+        >/dev/null 2>&1 && echo "umbra: nuclei installed" || echo "umbra: nuclei skipped"
+fi
+
 # --- wordlists (rockyou) ---
 mkdir -p /usr/share/wordlists
 if retry 4 curl -fsSL https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt \

@@ -199,6 +199,7 @@ umbra-os/
 - **[docs/OPSEC.md](docs/OPSEC.md)** — the opsec layer, the Tor kill-switch design, and its limits.
 - **[docs/REDTEAM.md](docs/REDTEAM.md)** — the Red Team Edition toolkit, how to build it, and its authorized-use policy.
 - **[docs/ASSISTANT.md](docs/ASSISTANT.md)** — Umbra Assistant: the local, private AI with a semantic memory graph, computer understanding, Context Capsules, and a shared-memory MCP server.
+- **[docs/AGENT.md](docs/AGENT.md)** — Umbra Agent: the AI-native security control plane — scope-gated, structured (JSON) offensive tools + a findings graph + audit, exposed to AI agents over MCP.
 
 ## Known limitations
 - **hardened_malloc** ships pre-built (a portable, `CONFIG_NATIVE=false` shared object vendored in

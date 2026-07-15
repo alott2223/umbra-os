@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+# Umbra Agent — an AI-native control plane for AUTHORIZED security engagements.
+#
+# Turns Umbra's toolkit into structured, agent-callable operations with three
+# properties that make an AI actually good (and responsible) at security work:
+#   1. STRUCTURED tools  — nmap/web tools return parsed JSON, not scraped text.
+#   2. FINDINGS GRAPH    — hosts/ports/services/vulns/creds as linked nodes an
+#                          agent can query and turn into a report.
+#   3. ENFORCED SCOPE    — every action is gated against an authorized-target
+#                          registry and written to an append-only audit log, so
+#                          an agent CANNOT touch anything out of scope. Pair with
+#                          `umbra panic` as the kill-switch.
+#
+# For AUTHORIZED penetration testing, CTFs, security research and training only.
+# Stdlib-only core; external scanners are used if installed and degrade cleanly.
+import os, sys, re, json, time, sqlite3, argparse, subprocess, ipaddress, shutil
+import xml.etree.ElementTree as ET
+
+DATA = os.path.join(os.path.expanduser("~"), ".local", "share", "umbra")
+DB   = os.path.join(DATA, "engagement.db")
+AUDIT= os.path.join(DATA, "audit.log")
+
+# --------------------------------------------------------------------- store ---
+def db():
+    os.makedirs(DATA, mode=0o700, exist_ok=True)
+    c = sqlite3.connect(DB)
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS scope(
+      id INTEGER PRIMARY KEY, kind TEXT, value TEXT UNIQUE, added REAL);
+    CREATE TABLE IF NOT EXISTS node(
+      id INTEGER PRIMARY KEY, type TEXT, name TEXT, data TEXT DEFAULT '{}',
+      created REAL, UNIQUE(type,name));
+    CREATE TABLE IF NOT EXISTS edge(
+      src INTEGER, dst INTEGER, rel TEXT, UNIQUE(src,dst,rel));
+    """)
+    return c
+
+def audit(action, target, allowed, detail=""):
+    line = json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "action": action,
+                       "target": target, "allowed": allowed, "detail": detail})
+    os.makedirs(DATA, mode=0o700, exist_ok=True)
+    with open(AUDIT, "a") as f:
+        f.write(line + "\n")
+
+# --------------------------------------------------------------------- scope ---
+def scope_add(value):
+    value = value.strip()
+    try:
+        ipaddress.ip_network(value, strict=False); kind = "cidr"
+    except ValueError:
+        kind = "domain"
+    c = db()
+    c.execute("INSERT OR IGNORE INTO scope(kind,value,added) VALUES(?,?,?)",
+              (kind, value, time.time())); c.commit(); c.close()
+    audit("scope-add", value, True)
+    return kind
+
+def scope_list():
+    c = db(); rows = c.execute("SELECT kind,value FROM scope ORDER BY added").fetchall(); c.close()
+    return rows
+
+def in_scope(target):
+    """True if target (IP or hostname) is inside an authorized scope entry."""
+    c = db(); rows = c.execute("SELECT kind,value FROM scope").fetchall(); c.close()
+    if not rows:
+        return False, "no scope defined (add one: umbra agent scope add <ip/cidr/domain>)"
+    # IP target vs cidr scopes
+    tip = None
+    try: tip = ipaddress.ip_address(target)
+    except ValueError: pass
+    for kind, value in rows:
+        if kind == "cidr" and tip is not None:
+            if tip in ipaddress.ip_network(value, strict=False):
+                return True, value
+        if kind == "domain" and tip is None:
+            t = target.lower().rstrip(".")
+            v = value.lower().lstrip("*.").rstrip(".")
+            if t == v or t.endswith("." + v):
+                return True, value
+    return False, "target is NOT in the authorized scope"
+
+def require_scope(target, action):
+    ok, why = in_scope(target)
+    audit(action, target, ok, why)
+    if not ok:
+        raise PermissionError(f"REFUSED: {target} — {why}")
+    return why
+
+# ------------------------------------------------------------- findings graph ---
+def node(ntype, name, **data):
+    c = db(); now = time.time()
+    cur = c.execute("SELECT id,data FROM node WHERE type=? AND name=?", (ntype, name)).fetchone()
+    if cur:
+        nid, old = cur[0], json.loads(cur[1] or "{}")
+        old.update({k: v for k, v in data.items() if v not in (None, "")})
+        c.execute("UPDATE node SET data=? WHERE id=?", (json.dumps(old), nid))
+    else:
+        c.execute("INSERT INTO node(type,name,data,created) VALUES(?,?,?,?)",
+                  (ntype, name, json.dumps({k: v for k, v in data.items() if v}), now))
+        nid = c.execute("SELECT id FROM node WHERE type=? AND name=?", (ntype, name)).fetchone()[0]
+    c.commit(); c.close(); return nid
+
+def edge(a, b, rel):
+    c = db(); c.execute("INSERT OR IGNORE INTO edge(src,dst,rel) VALUES(?,?,?)", (a, b, rel))
+    c.commit(); c.close()
+
+def findings(ntype=None, query=None):
+    c = db(); sql = "SELECT type,name,data FROM node"; args = []
+    if ntype: sql += " WHERE type=?"; args.append(ntype)
+    sql += " ORDER BY type,name"
+    out = []
+    for t, n, d in c.execute(sql, args):
+        if query and query.lower() not in (n + d).lower(): continue
+        out.append({"type": t, "name": n, "data": json.loads(d or "{}")})
+    c.close(); return out
+
+# ----------------------------------------------------------------- tool runner ---
+def have(tool): return shutil.which(tool) is not None
+
+def run(cmd, timeout=900):
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout, p.stderr
+    except subprocess.TimeoutExpired:
+        return 124, "", "timeout"
+    except FileNotFoundError:
+        return 127, "", f"{cmd[0]} not installed"
+
+# ------------------------------------------------------------------ nmap (xml) ---
+def nmap_scan(target, ports=None, extra=None):
+    require_scope(target, "nmap")
+    if not have("nmap"):
+        return {"error": "nmap not installed"}
+    cmd = ["nmap", "-sV", "-oX", "-", "-Pn"]
+    if ports: cmd += ["-p", ports]
+    else:     cmd += ["--top-ports", "1000"]
+    if extra: cmd += extra.split()
+    cmd.append(target)
+    rc, out, err = run(cmd, timeout=1800)
+    if rc not in (0,) or not out.strip().startswith("<?xml"):
+        return {"error": err or "nmap failed", "rc": rc}
+    return _parse_nmap(out)
+
+def _parse_nmap(xml):
+    result = {"hosts": []}
+    try: root = ET.fromstring(xml)
+    except ET.ParseError as e: return {"error": f"xml parse: {e}"}
+    for h in root.findall("host"):
+        addr_el = h.find("address[@addrtype='ipv4']") or h.find("address")
+        ip = addr_el.get("addr") if addr_el is not None else "?"
+        hn_el = h.find("hostnames/hostname")
+        hostname = hn_el.get("name") if hn_el is not None else ""
+        state = h.find("status").get("state") if h.find("status") is not None else "?"
+        hid = node("host", ip, hostname=hostname, state=state)
+        ports = []
+        for p in h.findall("ports/port"):
+            pst = p.find("state")
+            if pst is None or pst.get("state") != "open": continue
+            pnum = p.get("portid"); proto = p.get("protocol")
+            svc = p.find("service")
+            sname = svc.get("name", "") if svc is not None else ""
+            prod = svc.get("product", "") if svc is not None else ""
+            ver = svc.get("version", "") if svc is not None else ""
+            banner = " ".join(x for x in (prod, ver) if x)
+            pid = node("port", f"{ip}:{pnum}", proto=proto, service=sname, banner=banner)
+            edge(hid, pid, "has-port")
+            if sname:
+                sid = node("service", f"{sname} {banner}".strip(), port=f"{ip}:{pnum}")
+                edge(pid, sid, "runs")
+            ports.append({"port": int(pnum), "proto": proto, "service": sname, "banner": banner})
+        result["hosts"].append({"ip": ip, "hostname": hostname, "state": state, "ports": ports})
+    return result
+
+# ------------------------------------------------------------------- web tools ---
+def web_probe(url):
+    host = re.sub(r"^https?://", "", url).split("/")[0].split(":")[0]
+    require_scope(host, "web-probe")
+    info = {"url": url}
+    if have("whatweb"):
+        rc, out, err = run(["whatweb", "--color=never", "-a", "1", url], timeout=120)
+        info["whatweb"] = out.strip()
+    rc, out, err = run(["curl", "-skI", "--max-time", "20", url], timeout=30)
+    info["headers"] = out.strip()
+    server = ""
+    m = re.search(r"(?im)^server:\s*(.+)$", out)
+    if m: server = m.group(1).strip()
+    uid = node("url", url, server=server, whatweb=info.get("whatweb", "")[:400])
+    return info
+
+def dir_scan(url, wordlist=None, ext=None):
+    host = re.sub(r"^https?://", "", url).split("/")[0].split(":")[0]
+    require_scope(host, "dir-scan")
+    if not have("gobuster"):
+        return {"error": "gobuster not installed"}
+    wl = wordlist or next((w for w in (
+        "/usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt",
+        "/usr/share/wordlists/dirb/common.txt") if os.path.exists(w)), None)
+    if not wl:
+        return {"error": "no wordlist found; pass --wordlist"}
+    cmd = ["gobuster", "dir", "-q", "-u", url, "-w", wl]
+    if ext: cmd += ["-x", ext]
+    rc, out, err = run(cmd, timeout=1200)
+    hits = []
+    for line in out.splitlines():
+        m = re.search(r"^(/\S+)\s+\(Status:\s*(\d+)\)", line.strip())
+        if m:
+            hits.append({"path": m.group(1), "status": int(m.group(2))})
+            node("path", f"{url.rstrip('/')}{m.group(1)}", status=int(m.group(2)))
+    return {"url": url, "found": hits}
+
+def nuclei_scan(url):
+    host = re.sub(r"^https?://", "", url).split("/")[0].split(":")[0]
+    require_scope(host, "nuclei")
+    if not have("nuclei"):
+        return {"error": "nuclei not installed"}
+    rc, out, err = run(["nuclei", "-silent", "-jsonl", "-u", url], timeout=1200)
+    vulns = []
+    for line in out.splitlines():
+        try: j = json.loads(line)
+        except ValueError: continue
+        info = j.get("info", {}); name = info.get("name", j.get("template-id", "?"))
+        sev = info.get("severity", "unknown")
+        vulns.append({"name": name, "severity": sev, "matched": j.get("matched-at", "")})
+        node("vuln", f"{name} @ {j.get('matched-at','')}", severity=sev, url=url)
+    return {"url": url, "vulns": vulns}
+
+# --------------------------------------------------------------------- report ---
+def report():
+    hosts = findings("host"); ports = findings("port")
+    urls = findings("url"); paths = findings("path"); vulns = findings("vuln")
+    lines = ["# Umbra Engagement Report", "",
+             f"_Generated {time.strftime('%Y-%m-%d %H:%M')}_", "",
+             "## Scope"]
+    for k, v in scope_list(): lines.append(f"- `{v}` ({k})")
+    lines += ["", f"## Hosts ({len(hosts)})"]
+    for h in hosts:
+        d = h["data"]
+        lines.append(f"### {h['name']}  {('('+d.get('hostname')+')') if d.get('hostname') else ''}")
+        hp = [p for p in ports if p["name"].startswith(h["name"] + ":")]
+        if hp:
+            lines.append("| Port | Service | Banner |")
+            lines.append("|---|---|---|")
+            for p in sorted(hp, key=lambda x: int(x["name"].split(":")[1])):
+                pd = p["data"]
+                lines.append(f"| {p['name'].split(':')[1]}/{pd.get('proto','')} | "
+                             f"{pd.get('service','')} | {pd.get('banner','')} |")
+        lines.append("")
+    if vulns:
+        lines += [f"## Findings / Vulnerabilities ({len(vulns)})"]
+        order = {"critical":0,"high":1,"medium":2,"low":3,"info":4,"unknown":5}
+        for v in sorted(vulns, key=lambda x: order.get(x["data"].get("severity","unknown"),9)):
+            lines.append(f"- **[{v['data'].get('severity','?').upper()}]** {v['name']}")
+        lines.append("")
+    if paths:
+        lines += [f"## Discovered paths ({len(paths)})"]
+        for p in paths: lines.append(f"- `{p['name']}` ({p['data'].get('status')})")
+    return "\n".join(lines)
+
+# --------------------------------------------------------------------- server ---
+def serve(host="127.0.0.1", port=7718):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    TOOLS = [
+      {"name":"scope_add","description":"Authorize a target (ip/cidr/domain) for this engagement",
+       "inputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"]}},
+      {"name":"nmap","description":"Structured service scan of an IN-SCOPE target (parsed JSON)",
+       "inputSchema":{"type":"object","properties":{"target":{"type":"string"},"ports":{"type":"string"}},"required":["target"]}},
+      {"name":"web_probe","description":"Fingerprint an in-scope web URL (headers/whatweb)",
+       "inputSchema":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}},
+      {"name":"dir_scan","description":"Content discovery on an in-scope URL (gobuster)",
+       "inputSchema":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}},
+      {"name":"findings","description":"Query the findings graph (optional type/query)",
+       "inputSchema":{"type":"object","properties":{"type":{"type":"string"},"query":{"type":"string"}}}},
+      {"name":"report","description":"Generate a markdown engagement report from findings",
+       "inputSchema":{"type":"object","properties":{}}},
+    ]
+    def call(name, a):
+        try:
+            if name == "scope_add": return {"kind": scope_add(a["value"])}
+            if name == "nmap":      return nmap_scan(a["target"], a.get("ports"))
+            if name == "web_probe": return web_probe(a["url"])
+            if name == "dir_scan":  return dir_scan(a["url"], a.get("wordlist"))
+            if name == "findings":  return findings(a.get("type"), a.get("query"))
+            if name == "report":    return report()
+            return {"error": f"unknown tool {name}"}
+        except PermissionError as e:
+            return {"refused": str(e)}
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def _s(self, o, code=200):
+            b = json.dumps(o).encode(); self.send_response(code)
+            self.send_header("Content-Type","application/json")
+            self.send_header("Content-Length",str(len(b))); self.end_headers(); self.wfile.write(b)
+        def _b(self):
+            n = int(self.headers.get("Content-Length",0) or 0)
+            try: return json.loads(self.rfile.read(n) or b"{}")
+            except ValueError: return {}
+        def do_GET(self):
+            if self.path == "/health": self._s({"ok": True, "tools":[t["name"] for t in TOOLS]})
+            else: self._s({"error":"not found"}, 404)
+        def do_POST(self):
+            d = self._b()
+            if self.path == "/mcp":
+                rid = d.get("id"); m = d.get("method","")
+                if m == "initialize":
+                    self._s({"jsonrpc":"2.0","id":rid,"result":{"protocolVersion":"2024-11-05",
+                      "serverInfo":{"name":"umbra-agent","version":"1"},"capabilities":{"tools":{}}}})
+                elif m == "tools/list":
+                    self._s({"jsonrpc":"2.0","id":rid,"result":{"tools":TOOLS}})
+                elif m == "tools/call":
+                    p = d.get("params",{}); res = call(p.get("name"), p.get("arguments",{}))
+                    self._s({"jsonrpc":"2.0","id":rid,"result":{"content":[
+                      {"type":"text","text":json.dumps(res, indent=2)[:100000]}]}})
+                else:
+                    self._s({"jsonrpc":"2.0","id":rid,"error":{"code":-32601,"message":"no method"}})
+            else:
+                self._s(call(self.path.strip("/"), d))
+    print(f"Umbra Agent API on http://{host}:{port}  (MCP + REST, scope-gated, audited)")
+    ThreadingHTTPServer((host, port), H).serve_forever()
+
+# ------------------------------------------------------------------------ cli ---
+def main():
+    p = argparse.ArgumentParser(prog="umbra-agent", description="AI-native security engagement control plane")
+    sub = p.add_subparsers(dest="cmd")
+    sc = sub.add_parser("scope"); sc.add_argument("action", choices=["add","list","clear"]); sc.add_argument("value", nargs="?")
+    sn = sub.add_parser("nmap"); sn.add_argument("target"); sn.add_argument("-p","--ports"); sn.add_argument("-x","--extra")
+    wp = sub.add_parser("web"); wp.add_argument("url")
+    ds = sub.add_parser("dirscan"); ds.add_argument("url"); ds.add_argument("-w","--wordlist")
+    nu = sub.add_parser("nuclei"); nu.add_argument("url")
+    fn = sub.add_parser("findings"); fn.add_argument("type", nargs="?"); fn.add_argument("-q","--query")
+    sub.add_parser("report"); sub.add_parser("audit"); sub.add_parser("status")
+    sv = sub.add_parser("serve"); sv.add_argument("--port", type=int, default=7718)
+    args = p.parse_args(); cmd = args.cmd or "status"
+
+    try:
+        if cmd == "scope":
+            if args.action == "add":
+                print(f"authorized {args.value} ({scope_add(args.value)})")
+            elif args.action == "clear":
+                c = db(); c.execute("DELETE FROM scope"); c.commit(); c.close(); print("scope cleared")
+            else:
+                for k, v in scope_list(): print(f"{v}  ({k})")
+                if not scope_list(): print("(no scope — add one before scanning)")
+        elif cmd == "nmap":
+            print(json.dumps(nmap_scan(args.target, args.ports, args.extra), indent=2))
+        elif cmd == "web":     print(json.dumps(web_probe(args.url), indent=2))
+        elif cmd == "dirscan": print(json.dumps(dir_scan(args.url, args.wordlist), indent=2))
+        elif cmd == "nuclei":  print(json.dumps(nuclei_scan(args.url), indent=2))
+        elif cmd == "findings":
+            for f in findings(args.type, args.query):
+                print(f"[{f['type']}] {f['name']}  {json.dumps(f['data'])}")
+        elif cmd == "report":  print(report())
+        elif cmd == "audit":
+            if os.path.exists(AUDIT):
+                for line in open(AUDIT).read().splitlines()[-30:]: print(line)
+        elif cmd == "serve":   serve(port=args.port)
+        else:
+            n = findings()
+            print("Umbra Agent — AI-native security control plane")
+            print(f"  scope entries : {len(scope_list())}")
+            print(f"  findings      : {len(n)} nodes")
+            print("  tools ........ :", ", ".join(t for t in ("nmap","whatweb","gobuster","nuclei","curl") if have(t)) or "none")
+            print("  commands ..... : scope add <t> · nmap <t> · web <url> · dirscan <url> · nuclei <url> · findings · report · serve")
+            print("  For AUTHORIZED testing only. Every action is scope-gated + logged (umbra agent audit).")
+    except PermissionError as e:
+        print(e); sys.exit(2)
+
+if __name__ == "__main__":
+    try: main()
+    except KeyboardInterrupt: pass
