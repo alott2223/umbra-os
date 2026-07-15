@@ -17,6 +17,11 @@ allow-guest=false
 EOF
 fi
 
+# Live account cosmetic: replace live-config's default "Debian Live user" full
+# name with "Umbra" (only affects the live 'user' account; installed systems use
+# the name chosen in the installer). Runs before the display manager.
+id -u user >/dev/null 2>&1 && usermod -c "Umbra" user 2>/dev/null || true
+
 systemctl restart apparmor.service 2>/dev/null || true
 
 # DNS safety net: if, after NM has had a moment, nothing resolves AND resolv.conf

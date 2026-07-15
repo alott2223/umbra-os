@@ -42,7 +42,7 @@ lb config \
     --binary-images iso-hybrid \
     --compression xz \
     --apt-indices false \
-    --bootappend-live "boot=live components quiet splash slab_nomerge init_on_alloc=1 init_on_free=1 page_alloc.shuffle=1 randomize_kstack_offset=on pti=on vsyscall=none debugfs=off oops=panic lockdown=confidentiality mce=0 iommu.strict=1 iommu.passthrough=0 efi=disable_early_pci_dma random.trust_cpu=off random.trust_bootloader=off mitigations=auto,nosmt apparmor=1" \
+    --bootappend-live "boot=live components live-config.user-fullname=Umbra live-config.hostname=umbra quiet splash slab_nomerge init_on_alloc=1 init_on_free=1 page_alloc.shuffle=1 randomize_kstack_offset=on pti=on vsyscall=none debugfs=off oops=panic lockdown=confidentiality mce=0 iommu.strict=1 iommu.passthrough=0 efi=disable_early_pci_dma random.trust_cpu=off random.trust_bootloader=off mitigations=auto,nosmt apparmor=1" \
     --security true \
     --updates true \
     --apt-secure true \
