@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+# Umbra Bounty — a bug-bounty hunting workflow for AUTHORIZED programs.
+#
+# Encodes real methodology so an AI (or you) can hunt systematically and write it
+# up properly:
+#   * PROGRAM registry  — scope in/out, reward table, rules (e.g. "no scanners");
+#     the in-scope entries seed umbra-agent's scope gate, so scanning a target
+#     outside the program is refused before it runs.
+#   * PLAYBOOK          — a structured web-app checklist (recon, authn, access
+#     control, injection, CSRF, business logic, files, client-side, disclosure)
+#     with per-item status, so nothing is skipped and progress is tracked.
+#   * FINDINGS          — tracked with severity mapped to the program's rewards.
+#   * REPORT            — HackerOne-style write-up (title, CVSS, repro, PoC,
+#     impact, remediation) — what mature programs actually want (not scanner dumps).
+#
+# Shares ~/.local/share/umbra/engagement.db with `umbra agent`. For AUTHORIZED
+# testing only — stay inside the program's scope; production/OOS targets are off.
+import os, sys, json, time, sqlite3, argparse, ipaddress
+
+DATA = os.path.join(os.path.expanduser("~"), ".local", "share", "umbra")
+DB   = os.path.join(DATA, "engagement.db")
+
+# ---- the encoded methodology (this is the "learning"): web-app hunting playbook ---
+PLAYBOOK = {
+  "Recon & mapping": [
+    "Enumerate in-scope hosts/subdomains; confirm each is in scope before touching",
+    "Spider the app authenticated + unauthenticated; catalog every endpoint",
+    "Identify tech stack, framework, API style (REST/GraphQL), CDN/WAF",
+    "Pull & read client JS for endpoints, feature flags, hardcoded secrets",
+    "Enumerate GraphQL schema (introspection) or API routes; map object types",
+    "Map the roles/permission model (owner/admin/editor/commenter/viewer, tenants)",
+  ],
+  "Authentication & session": [
+    "Password reset: token entropy/reuse/expiry, host-header poisoning, user-enum",
+    "Session: fixation, non-rotation on login, logout invalidation, cookie flags",
+    "JWT: alg=none, weak secret, unverified signature, sensitive claims client-side",
+    "OAuth/SSO: redirect_uri validation, state param, account linking/takeover",
+    "MFA: bypass, brute-force, backup-code weakness, enrollment race",
+  ],
+  "Access control / authz (highest value)": [
+    "IDOR: swap object ids (records/bases/views/files/users) across accounts",
+    "Horizontal privesc: read/edit ANOTHER user's or workspace's data",
+    "Vertical privesc: viewer->editor->admin action via the API the UI hides",
+    "Tenant isolation: cross-workspace/base data access",
+    "Forced browsing: hit admin/enterprise endpoints as a low-priv user",
+    "Mass-assignment: set fields (role, owner, isAdmin) the UI doesn't expose",
+  ],
+  "Injection": [
+    "Stored XSS: every sink where user content renders in another user's context",
+    "Reflected/DOM XSS: params, fragments, postMessage, template rendering",
+    "SQL/NoSQL injection in search/filter/sort params",
+    "SSRF: URL fetchers, webhooks, integrations, image/import-by-URL",
+    "SSTI / command injection in any server-side templating or exec path",
+    "XXE in XML/office/import parsers",
+  ],
+  "CSRF & client-side": [
+    "State-changing requests missing anti-CSRF token; check SameSite",
+    "CORS: reflected Origin + credentials; wildcard with creds",
+    "Open redirect in login/return_to/next params",
+    "Clickjacking on sensitive actions (X-Frame-Options/CSP frame-ancestors)",
+    "postMessage origin validation; DOM clobbering",
+  ],
+  "Business logic": [
+    "Quota/plan/credit manipulation; invite/referral abuse",
+    "Race conditions on limited actions (invites, seats, redemptions)",
+    "Workflow bypass: skip a required step via direct API call",
+    "Price/negative-quantity/parameter tampering",
+  ],
+  "Files & disclosure": [
+    "Upload: content-type/exec bypass, path traversal, SVG/HTML stored XSS",
+    "Sensitive data in API responses/errors beyond what the UI shows",
+    "Verbose errors / stack traces / debug endpoints",
+    "Secrets in JS, source maps, or backup/old endpoints",
+  ],
+}
+
+def db():
+    os.makedirs(DATA, mode=0o700, exist_ok=True)
+    c = sqlite3.connect(DB)
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS scope(
+      id INTEGER PRIMARY KEY, kind TEXT, value TEXT UNIQUE, added REAL);
+    CREATE TABLE IF NOT EXISTS program(
+      name TEXT PRIMARY KEY, url TEXT, scope_in TEXT DEFAULT '[]',
+      scope_out TEXT DEFAULT '[]', rewards TEXT DEFAULT '{}', rules TEXT DEFAULT '',
+      added REAL);
+    CREATE TABLE IF NOT EXISTS checklist(
+      id INTEGER PRIMARY KEY, program TEXT, category TEXT, item TEXT,
+      status TEXT DEFAULT 'todo', notes TEXT DEFAULT '');
+    CREATE TABLE IF NOT EXISTS finding(
+      id INTEGER PRIMARY KEY, program TEXT, title TEXT, klass TEXT,
+      severity TEXT, target TEXT, cvss TEXT DEFAULT '', steps TEXT DEFAULT '',
+      poc TEXT DEFAULT '', impact TEXT DEFAULT '', remediation TEXT DEFAULT '',
+      status TEXT DEFAULT 'draft', created REAL);
+    """)
+    return c
+
+def _scope_kind(v):
+    try: ipaddress.ip_network(v, strict=False); return "cidr"
+    except ValueError: return "domain"
+
+# ------------------------------------------------------------------- programs ---
+def program_add(name, url=""):
+    c = db()
+    c.execute("INSERT OR IGNORE INTO program(name,url,added) VALUES(?,?,?)", (name, url, time.time()))
+    # seed the methodology checklist for this program
+    if not c.execute("SELECT 1 FROM checklist WHERE program=? LIMIT 1", (name,)).fetchone():
+        for cat, items in PLAYBOOK.items():
+            for it in items:
+                c.execute("INSERT INTO checklist(program,category,item) VALUES(?,?,?)", (name, cat, it))
+    c.commit(); c.close()
+
+def program_scope(name, value, direction="in"):
+    c = db()
+    row = c.execute("SELECT scope_in,scope_out FROM program WHERE name=?", (name,)).fetchone()
+    if not row: print("no such program (add it first)"); return
+    si, so = json.loads(row[0]), json.loads(row[1])
+    (si if direction == "in" else so).append(value)
+    c.execute("UPDATE program SET scope_in=?,scope_out=? WHERE name=?",
+              (json.dumps(sorted(set(si))), json.dumps(sorted(set(so))), name))
+    if direction == "in":   # seed umbra-agent's gate
+        c.execute("INSERT OR IGNORE INTO scope(kind,value,added) VALUES(?,?,?)",
+                  (_scope_kind(value), value, time.time()))
+    c.commit(); c.close()
+
+def program_reward(name, severity, amount):
+    c = db(); row = c.execute("SELECT rewards FROM program WHERE name=?", (name,)).fetchone()
+    if not row: print("no such program"); return
+    r = json.loads(row[0]); r[severity.lower()] = amount
+    c.execute("UPDATE program SET rewards=? WHERE name=?", (json.dumps(r), name)); c.commit(); c.close()
+
+def program_show(name):
+    c = db(); row = c.execute("SELECT url,scope_in,scope_out,rewards,rules FROM program WHERE name=?", (name,)).fetchone()
+    if not row: print("no such program"); return
+    url, si, so, rw, rules = row
+    print(f"# {name}   {url}")
+    print("in-scope  :", ", ".join(json.loads(si)) or "(none)")
+    print("out-scope :", ", ".join(json.loads(so)) or "(none)")
+    rww = json.loads(rw)
+    if rww: print("rewards   :", ", ".join(f"{k}=${v}" for k, v in rww.items()))
+    if rules: print("rules     :", rules)
+    done = c.execute("SELECT COUNT(*) FROM checklist WHERE program=? AND status IN('clear','found','na')", (name,)).fetchone()[0]
+    tot = c.execute("SELECT COUNT(*) FROM checklist WHERE program=?", (name,)).fetchone()[0]
+    fnd = c.execute("SELECT COUNT(*) FROM finding WHERE program=?", (name,)).fetchone()[0]
+    print(f"progress  : {done}/{tot} checklist items · {fnd} findings")
+    c.close()
+
+# ------------------------------------------------------------------ checklist ---
+def checklist_show(name, category=None):
+    c = db(); sql = "SELECT id,category,item,status,notes FROM checklist WHERE program=?"; args = [name]
+    if category: sql += " AND category LIKE ?"; args.append(f"%{category}%")
+    sql += " ORDER BY id"
+    mark = {"todo":"[ ]","testing":"[~]","clear":"[x]","found":"[!]","na":"[-]"}
+    cat = None
+    for cid, ccat, item, status, notes in c.execute(sql, args):
+        if ccat != cat: print(f"\n## {ccat}"); cat = ccat
+        print(f"  {cid:>3} {mark.get(status,'[ ]')} {item}" + (f"  — {notes}" if notes else ""))
+    c.close()
+
+def checklist_set(cid, status, notes=None):
+    c = db(); q = "UPDATE checklist SET status=?"; args = [status]
+    if notes is not None: q += ",notes=?"; args.append(notes)
+    q += " WHERE id=?"; args.append(cid)
+    c.execute(q, args); c.commit(); c.close()
+
+# ------------------------------------------------------------------- findings ---
+def finding_add(program, title, klass, severity, target, **kw):
+    c = db()
+    cur = c.execute("""INSERT INTO finding(program,title,klass,severity,target,steps,poc,impact,remediation,created)
+                 VALUES(?,?,?,?,?,?,?,?,?,?)""",
+              (program, title, klass, severity.lower(), target, kw.get("steps",""),
+               kw.get("poc",""), kw.get("impact",""), kw.get("remediation",""), time.time()))
+    fid = cur.lastrowid; c.commit()
+    row = c.execute("SELECT rewards FROM program WHERE name=?", (program,)).fetchone()
+    c.close()
+    est = json.loads(row[0]).get(severity.lower()) if row else None
+    return fid, est
+
+def finding_list(program=None):
+    c = db(); sql = "SELECT id,program,severity,klass,title,status FROM finding"; args = []
+    if program: sql += " WHERE program=?"; args.append(program)
+    sql += " ORDER BY id DESC"
+    rows = c.execute(sql, args).fetchall(); c.close(); return rows
+
+CVSS_HINT = {"critical":"9.0–10.0","high":"7.0–8.9","medium":"4.0–6.9","low":"0.1–3.9"}
+def report(fid):
+    c = db(); f = c.execute("""SELECT program,title,klass,severity,target,cvss,steps,poc,impact,remediation
+                               FROM finding WHERE id=?""", (fid,)).fetchone()
+    if not f: c.close(); return "no such finding"
+    prog, title, klass, sev, target, cvss, steps, poc, impact, remediation = f
+    rw = c.execute("SELECT rewards FROM program WHERE name=?", (prog,)).fetchone()
+    c.close()
+    est = json.loads(rw[0]).get(sev) if rw else None
+    L = [f"# {title}", "",
+         f"**Program:** {prog}    **Severity:** {sev.title()} "
+         f"({cvss or CVSS_HINT.get(sev,'?')} CVSS)" + (f"    **Est. bounty:** ${est}" if est else ""),
+         f"**Weakness:** {klass}", f"**Affected asset:** `{target}`", "",
+         "## Summary", (impact.split('.')[0]+'.') if impact else "_<one-line summary of the issue>_", "",
+         "## Steps to reproduce"]
+    if steps:
+        for i, s in enumerate([s for s in steps.split("\n") if s.strip()], 1):
+            L.append(f"{i}. {s.strip()}")
+    else:
+        L += ["1. _<step>_", "2. _<step>_"]
+    L += ["", "## Proof of concept", "```", poc or "<request / payload / screenshot reference>", "```", "",
+          "## Impact", impact or "_<what an attacker gains; who is affected>_", "",
+          "## Remediation", remediation or "_<how to fix>_", "",
+          "---", "_Tested only within program scope. Reported via the program's disclosure process._"]
+    return "\n".join(L)
+
+# ------------------------------------------------------------------------ cli ---
+def main():
+    p = argparse.ArgumentParser(prog="umbra-bounty", description="Bug-bounty hunting workflow (authorized programs)")
+    sub = p.add_subparsers(dest="cmd")
+    pr = sub.add_parser("program"); pr.add_argument("action", choices=["add","show","scope","reward","rule","list"])
+    pr.add_argument("name", nargs="?"); pr.add_argument("a1", nargs="?"); pr.add_argument("a2", nargs="?")
+    pr.add_argument("--url", default="")
+    cl = sub.add_parser("checklist"); cl.add_argument("program"); cl.add_argument("category", nargs="?")
+    ck = sub.add_parser("check"); ck.add_argument("id", type=int)
+    ck.add_argument("status", choices=["todo","testing","clear","found","na"]); ck.add_argument("-n","--notes")
+    fa = sub.add_parser("finding"); fa.add_argument("action", choices=["add","list"])
+    fa.add_argument("--program"); fa.add_argument("--title"); fa.add_argument("--class", dest="klass", default="")
+    fa.add_argument("--severity", default="medium"); fa.add_argument("--target", default="")
+    fa.add_argument("--steps", default=""); fa.add_argument("--impact", default=""); fa.add_argument("--poc", default="")
+    rp = sub.add_parser("report"); rp.add_argument("id", type=int)
+    sub.add_parser("status")
+    args = p.parse_args(); cmd = args.cmd or "status"
+
+    if cmd == "program":
+        if args.action == "add":   program_add(args.name, args.url); print(f"program '{args.name}' added (playbook seeded)")
+        elif args.action == "show": program_show(args.name)
+        elif args.action == "scope":
+            direction = args.a2 if args.a2 in ("in","out") else "in"
+            program_scope(args.name, args.a1, "out" if args.a1 in ("out",) else direction)
+            print(f"scope-{direction}: {args.a1}" + (" (also gates umbra agent)" if direction=='in' else ""))
+        elif args.action == "reward": program_reward(args.name, args.a1, args.a2); print(f"reward {args.a1}=${args.a2}")
+        elif args.action == "rule":
+            c = db(); c.execute("UPDATE program SET rules=? WHERE name=?", (args.a1, args.name)); c.commit(); c.close()
+            print("rule set")
+        else:
+            c = db()
+            for (n,) in c.execute("SELECT name FROM program ORDER BY added"): print(n)
+            c.close()
+    elif cmd == "checklist": checklist_show(args.program, args.category)
+    elif cmd == "check":     checklist_set(args.id, args.status, args.notes); print(f"#{args.id} -> {args.status}")
+    elif cmd == "finding":
+        if args.action == "add":
+            fid, est = finding_add(args.program, args.title, args.klass, args.severity, args.target,
+                                   steps=args.steps, impact=args.impact, poc=args.poc)
+            print(f"finding #{fid} recorded ({args.severity})" + (f" · est ${est}" if est else "")
+                  + f"\nwrite it up:  umbra bounty report {fid}")
+        else:
+            for i,pg,sv,kl,ti,st in finding_list(args.program):
+                print(f"#{i} [{sv}] {ti}  ({kl}) — {st}")
+    elif cmd == "report":    print(report(args.id))
+    else:
+        c = db()
+        progs = [r[0] for r in c.execute("SELECT name FROM program").fetchall()]
+        fnd = c.execute("SELECT COUNT(*) FROM finding").fetchone()[0]; c.close()
+        print("Umbra Bounty — authorized bug-bounty workflow")
+        print("  programs :", ", ".join(progs) or "(none — umbra bounty program add <name> --url <policy>)")
+        print("  findings :", fnd)
+        print("  flow ... : program add <n> · program scope <n> <host> · checklist <n> · check <id> testing")
+        print("             finding add --program <n> --title .. --severity .. · report <id>")
+        print("  Scope-in entries also gate `umbra agent`. Authorized programs only.")
+
+if __name__ == "__main__":
+    try: main()
+    except KeyboardInterrupt: pass

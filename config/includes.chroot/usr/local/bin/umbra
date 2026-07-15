@@ -58,6 +58,13 @@ ${C}AI SECURITY AGENT${N}  ${D}(scope-gated, structured, audited)${N}
    umbra agent report           generate an engagement report
    umbra agent serve            MCP + REST endpoint for AI agents
 
+${C}BUG-BOUNTY WORKFLOW${N}  ${D}(authorized programs only)${N}
+   umbra bounty program add <n>  register a program (seeds the scope gate)
+   umbra bounty checklist <n>    the web-app hunting playbook (tracked)
+   umbra bounty check <id> <st>  mark a checklist item testing/clear/found
+   umbra bounty finding add ..   record a finding (severity -> est. reward)
+   umbra bounty report <id>      HackerOne-style write-up (repro + PoC + impact)
+
 ${C}LOCAL AI ASSISTANT${N}  ${D}(private, offline, on-device)${N}
    umbra assistant ask <q>       retrieval-augmented answer (local LLM)
    umbra assistant remember <t>  store a memory (semantic graph)
@@ -93,6 +100,7 @@ case "$cmd" in
   ai)       exec umbra-ai "$@" ;;
   assistant|mem) exec umbra-assistant "$@" ;;
   agent)    exec umbra-agent "$@" ;;
+  bounty)   exec umbra-bounty "$@" ;;
   hardened-malloc) exec umbra-hardened-malloc.sh "$@" ;;
 
   audit)
