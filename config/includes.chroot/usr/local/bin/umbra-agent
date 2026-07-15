@@ -309,6 +309,70 @@ def _sev_counts(items):
     for it in items: c[it["severity"]] = c.get(it["severity"], 0) + 1
     return c
 
+# ------------------------------------------------------------ recon automation ---
+def enum_subdomains(domain):
+    """PASSIVE subdomain enumeration — subfinder if present, plus crt.sh
+    certificate-transparency logs. Sends no packets to the target itself."""
+    subs = set()
+    if have("subfinder"):
+        rc, out, _ = run(["subfinder", "-silent", "-d", domain], timeout=600)
+        subs |= {l.strip().lower() for l in out.splitlines() if l.strip()}
+    try:
+        import urllib.request
+        req = urllib.request.Request(f"https://crt.sh/?q=%25.{domain}&output=json",
+                                     headers={"User-Agent": "umbra-agent"})
+        for row in json.loads(urllib.request.urlopen(req, timeout=40).read() or b"[]"):
+            for name in (row.get("name_value", "") or "").split("\n"):
+                name = name.strip().lower().lstrip("*.")
+                if name.endswith("." + domain) or name == domain:
+                    subs.add(name)
+    except Exception:
+        pass
+    return sorted(subs)
+
+def _probe(host):
+    import urllib.request
+    for scheme in ("https", "http"):
+        try:
+            req = urllib.request.Request(f"{scheme}://{host}/", method="HEAD",
+                                         headers={"User-Agent": "umbra-agent"})
+            r = urllib.request.urlopen(req, timeout=8)
+            return {"url": f"{scheme}://{host}/", "status": r.status,
+                    "server": r.headers.get("Server", "")}
+        except Exception as e:
+            code = getattr(e, "code", None)
+            if code:
+                return {"url": f"{scheme}://{host}/", "status": code,
+                        "server": getattr(getattr(e, "headers", None), "get", lambda *_: "")("Server")}
+    return None
+
+def hunt(domain, do_nuclei=False, max_hosts=400):
+    """Automated recon pipeline: passive enum -> scope filter -> live probe ->
+    (optional) nuclei. Only IN-SCOPE hosts are ever touched actively."""
+    require_scope(domain, "hunt")
+    subs = enum_subdomains(domain)
+    result = {"domain": domain, "discovered": len(subs), "in_scope": 0, "live": [], "skipped_out_of_scope": 0}
+    live = []
+    for s in subs[:max_hosts]:
+        ok, _ = in_scope(s)
+        if not ok:
+            result["skipped_out_of_scope"] += 1
+            continue
+        result["in_scope"] += 1
+        node("host", s, source="enum")
+        info = _probe(s)   # active, but host is confirmed in-scope
+        audit("probe", s, True)
+        if info:
+            node("url", info["url"], status=info["status"], server=info.get("server", ""))
+            live.append(info); result["live"].append(info)
+    if do_nuclei and have("nuclei"):
+        for info in live:
+            try: nuclei_scan(info["url"])
+            except PermissionError: pass
+    result["note"] = ("nuclei run on live hosts" if do_nuclei and have("nuclei")
+                      else "run nuclei separately: umbra agent nuclei <url>")
+    return result
+
 # --------------------------------------------------------------------- report ---
 def report():
     hosts = findings("host"); ports = findings("port")
@@ -361,6 +425,10 @@ def serve(host="127.0.0.1", port=7718):
        "inputSchema":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}},
       {"name":"dir_scan","description":"Content discovery on an in-scope URL (gobuster)",
        "inputSchema":{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}},
+      {"name":"enum","description":"PASSIVE subdomain enumeration (crt.sh/subfinder) of an in-scope domain",
+       "inputSchema":{"type":"object","properties":{"domain":{"type":"string"}},"required":["domain"]}},
+      {"name":"hunt","description":"Automated recon: enum -> scope-filter -> live-probe (in-scope hosts only)",
+       "inputSchema":{"type":"object","properties":{"domain":{"type":"string"},"nuclei":{"type":"boolean"}},"required":["domain"]}},
       {"name":"code_audit","description":"Static-analyze a local codebase (SAST + heuristics) into findings",
        "inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},
       {"name":"findings","description":"Query the findings graph (optional type/query)",
@@ -374,6 +442,8 @@ def serve(host="127.0.0.1", port=7718):
             if name == "nmap":      return nmap_scan(a["target"], a.get("ports"))
             if name == "web_probe": return web_probe(a["url"])
             if name == "dir_scan":  return dir_scan(a["url"], a.get("wordlist"))
+            if name == "enum":      return {"domain": a["domain"], "subdomains": enum_subdomains(a["domain"])}
+            if name == "hunt":      return hunt(a["domain"], a.get("nuclei", False))
             if name == "code_audit": return code_audit(a["path"])
             if name == "findings":  return findings(a.get("type"), a.get("query"))
             if name == "report":    return report()
@@ -422,6 +492,8 @@ def main():
     wp = sub.add_parser("web"); wp.add_argument("url")
     ds = sub.add_parser("dirscan"); ds.add_argument("url"); ds.add_argument("-w","--wordlist")
     nu = sub.add_parser("nuclei"); nu.add_argument("url")
+    en = sub.add_parser("enum"); en.add_argument("domain")
+    hu = sub.add_parser("hunt"); hu.add_argument("domain"); hu.add_argument("--nuclei", action="store_true")
     ca = sub.add_parser("code"); ca.add_argument("path", nargs="?", default=".")
     fn = sub.add_parser("findings"); fn.add_argument("type", nargs="?"); fn.add_argument("-q","--query")
     sub.add_parser("report"); sub.add_parser("audit"); sub.add_parser("status")
@@ -442,6 +514,8 @@ def main():
         elif cmd == "web":     print(json.dumps(web_probe(args.url), indent=2))
         elif cmd == "dirscan": print(json.dumps(dir_scan(args.url, args.wordlist), indent=2))
         elif cmd == "nuclei":  print(json.dumps(nuclei_scan(args.url), indent=2))
+        elif cmd == "enum":    print("\n".join(enum_subdomains(args.domain)) or "(none found)")
+        elif cmd == "hunt":    print(json.dumps(hunt(args.domain, args.nuclei), indent=2))
         elif cmd == "code":    print(json.dumps(code_audit(args.path), indent=2))
         elif cmd == "findings":
             for f in findings(args.type, args.query):
